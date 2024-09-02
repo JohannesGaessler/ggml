@@ -337,14 +337,17 @@ mnist_model mnist_model_init_random(const std::string & arch) {
         fprintf(stderr, "%s: unknown model arch: %s\n", __func__, model.arch.c_str());
     }
 
+    model.buf_weightt = ggml_backend_alloc_ctx_tensors(model.ctx_weight, model.backend);
+
     for (ggml_tensor * t : init_tensors) {
         GGML_ASSERT(t->type == GGML_TYPE_F32);
-        float * data = ggml_get_data_f32(t);
         const int64_t ne = ggml_nelements(t);
+        std::vector<float> tmp(ne);
 
         for (int64_t i = 0; i < ne; ++i) {
-            data[i] = nd(gen);
+            tmp[i] = nd(gen);
         }
+        ggml_backend_tensor_set(t, tmp.data(), 0, ggml_nbytes(t));
     }
 
     return model;
@@ -451,8 +454,6 @@ void mnist_model_build(mnist_model & model, const int nbatch) {
     GGML_ASSERT(model.loss->ne[1] == 1);
     GGML_ASSERT(model.loss->ne[2] == 1);
     GGML_ASSERT(model.loss->ne[3] == 1);
-
-    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 }
 
 mnist_eval_result mnist_model_eval(const mnist_model & model, const float * images, const float * labels, const int nex, const int nthreads) {
@@ -505,15 +506,17 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
     ggml_build_forward_expand(gf, model.loss);
 
     struct ggml_cgraph * gb = ggml_graph_dup(model.ctx_compute, gf);
-    ggml_build_backward_expand(model.ctx_compute, gf, gb, true);
+    ggml_build_backward_expand(model.ctx_compute, gf, gb, false);
 
     struct ggml_opt_context opt_ctx;
     struct ggml_opt_params  opt_pars = ggml_opt_default_params(GGML_OPT_TYPE_ADAM);
     opt_pars.print_forward_graph = false;
     opt_pars.print_backward_graph = false;
-    opt_pars.n_threads = nthreads;
+    opt_pars.n_threads = std::thread::hardware_concurrency();
     opt_pars.adam.n_iter = 1; // per call of ggml_opt_resume_g
-    ggml_opt_init(model.ctx_compute, &opt_ctx, opt_pars, 0);
+    ggml_opt_init(model.ctx_compute, &opt_ctx, opt_pars, 397510);
+
+    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
     for (int epoch = 0; epoch < 20; ++epoch) {
         fprintf(stderr, "%s: epoch %d start...", __func__, epoch);
