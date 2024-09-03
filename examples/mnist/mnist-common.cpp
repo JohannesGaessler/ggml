@@ -521,19 +521,26 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
     for (int epoch = 0; epoch < 20; ++epoch) {
         fprintf(stderr, "%s: epoch %d start...", __func__, epoch);
         const int64_t t_start_us = ggml_time_us();
+
+        float loss;
+        std::vector<float> logits(model.nbatch*MNIST_NCLASSES);
+
         mnist_eval_result result;
         for (int iex0 = 0; iex0 < nex; iex0 += model.nbatch) {
-            memcpy(model.images->data, images + iex0*MNIST_NINPUT,   ggml_nbytes(model.images));
-            memcpy(model.labels->data, labels + iex0*MNIST_NCLASSES, ggml_nbytes(model.labels));
+            ggml_backend_tensor_set(model.images, images + iex0*MNIST_NINPUT,   0, ggml_nbytes(model.images));
+            ggml_backend_tensor_set(model.labels, labels + iex0*MNIST_NCLASSES, 0, ggml_nbytes(model.labels));
 
             enum ggml_opt_result opt_result = ggml_opt_resume_g(model.ctx_compute, &opt_ctx, model.loss, gf, gb, NULL, NULL);
             GGML_ASSERT(opt_result == GGML_OPT_RESULT_OK || opt_result == GGML_OPT_RESULT_DID_NOT_CONVERGE);
 
-            result.loss.push_back(*ggml_get_data_f32(model.loss));
+            ggml_backend_tensor_get(model.loss,   &loss,         0, ggml_nbytes(model.loss));
+            ggml_backend_tensor_get(model.logits, logits.data(), 0, ggml_nbytes(model.logits));
+
+            result.loss.push_back(loss);
 
             for (int iexb = 0; iexb < model.nbatch; ++iexb) {
-                const float * ptr_p = (const float *) model.logits->data + iexb*MNIST_NCLASSES;
-                result.pred.push_back(std::max_element(ptr_p, ptr_p + MNIST_NCLASSES) - ptr_p);
+                const float * logits_iexb = logits.data() + iexb*MNIST_NCLASSES;
+                result.pred.push_back(std::max_element(logits_iexb, logits_iexb + MNIST_NCLASSES) - logits_iexb);
             }
         }
 
