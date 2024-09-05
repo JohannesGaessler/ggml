@@ -2850,9 +2850,10 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
 
     "CROSS_ENTROPY_LOSS",
     "CROSS_ENTROPY_LOSS_BACK",
+    "OPT_STEP_ADAM",
 };
 
-static_assert(GGML_OP_COUNT == 78, "GGML_OP_COUNT != 78");
+static_assert(GGML_OP_COUNT == 79, "GGML_OP_COUNT != 79");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -2942,9 +2943,10 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
 
     "cross_entropy_loss(x,y)",
     "cross_entropy_loss_back(x,y)",
+    "adam(x)",
 };
 
-static_assert(GGML_OP_COUNT == 78, "GGML_OP_COUNT != 78");
+static_assert(GGML_OP_COUNT == 79, "GGML_OP_COUNT != 79");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -8099,6 +8101,26 @@ struct ggml_tensor * ggml_cross_entropy_loss_back(
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
+
+    return result;
+}
+
+// opt_step_adam
+
+struct ggml_tensor * ggml_opt_step_adam(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        float                 alpha) {
+    GGML_ASSERT(a->grad);
+
+    struct ggml_tensor * result = ggml_view_tensor(ctx, a);
+
+    result->op   = GGML_OP_OPT_STEP_ADAM;
+    result->grad = NULL;
+    result->src[0] = a;
+    result->src[1] = a->grad;
+
+    ggml_set_op_params(result, &alpha, sizeof(alpha));
 
     return result;
 }
@@ -17092,6 +17114,62 @@ static void ggml_compute_forward_cross_entropy_loss_back(
     }
 }
 
+static void ggml_compute_forward_opt_step_adam_f32(
+        const struct ggml_compute_params * params,
+        struct ggml_tensor * dst) {
+
+    const struct ggml_tensor * src0      = dst->src[0];
+    const struct ggml_tensor * src0_grad = dst->src[1];
+    GGML_ASSERT(ggml_are_same_shape(src0, src0_grad));
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    const int nr  = ggml_nrows(src0);
+
+    GGML_TENSOR_UNARY_OP_LOCALS
+    GGML_ASSERT(nb00 == sizeof(float));
+
+    // rows per thread
+    const int dr = (nr + nth - 1)/nth;
+
+    // row range for this thread
+    const int ir0 = dr*ith;
+    const int ir1 = MIN(ir0 + dr, nr);
+
+    const float alpha = ggml_get_op_params_f32(dst, 0);
+
+    for (int ir = ir0; ir < ir1; ++ir) {
+        const int64_t i03 = ir/(ne02*ne01);
+        const int64_t i02 = (ir - i03*ne02*ne01)/ne01;
+        const int64_t i01 = (ir - i03*ne02*ne01 - i02*ne01);
+
+        const size_t offset = i03*nb03 + i02*nb02 + i01*nb01;
+
+        float       * weight_ptr = (float       *) ((char       *) src0->data      + offset);
+        const float * grad_ptr   = (const float *) ((const char *) src0_grad->data + offset);
+
+        ggml_vec_mad_f32(ne00, weight_ptr, grad_ptr, -alpha);
+    }
+}
+
+static void ggml_compute_forward_opt_step_adam(
+        const struct ggml_compute_params * params,
+        struct ggml_tensor * dst) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+
+    switch (src0->type) {
+        case GGML_TYPE_F32:
+            {
+                ggml_compute_forward_opt_step_adam_f32(params, dst);
+            } break;
+        default:
+            {
+                GGML_ABORT("fatal error");
+            }
+    }
+}
 /////////////////////////////////
 
 static void ggml_compute_forward(struct ggml_compute_params * params, struct ggml_tensor * tensor) {
@@ -17431,6 +17509,11 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
         case GGML_OP_CROSS_ENTROPY_LOSS_BACK:
             {
                 ggml_compute_forward_cross_entropy_loss_back(params, tensor);
+            }
+            break;
+        case GGML_OP_OPT_STEP_ADAM:
+            {
+                ggml_compute_forward_opt_step_adam(params, tensor);
             }
             break;
         case GGML_OP_NONE:
@@ -18519,6 +18602,10 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_tensor 
             {
                 GGML_ABORT("fatal error"); // not supported
             }
+        case GGML_OP_OPT_STEP_ADAM:
+            {
+                GGML_ABORT("fatal error"); // not supported
+            }
         case GGML_OP_NONE:
             {
                 // nop
@@ -18648,6 +18735,16 @@ void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * 
         if (node->flags & GGML_TENSOR_FLAG_PARAM) {
             GGML_PRINT_DEBUG("%s: found root node %p\n", __func__, (void *) node);
             ggml_build_forward_expand(gb, node->grad);
+        }
+    }
+
+    for (int i = 0; i < gf->n_nodes; i++) {
+        struct ggml_tensor * node = gf->nodes[i];
+
+        if (node->flags & GGML_TENSOR_FLAG_PARAM) {
+            GGML_PRINT_DEBUG("%s: found root node %p\n", __func__, (void *) node);
+            struct ggml_tensor * opt_step = ggml_opt_step_adam(ctx, node, 0.001f);
+            ggml_build_forward_expand(gb, opt_step);
         }
     }
 
@@ -19106,6 +19203,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
             } break;
         case GGML_OP_CROSS_ENTROPY_LOSS:
         case GGML_OP_CROSS_ENTROPY_LOSS_BACK:
+        case GGML_OP_OPT_STEP_ADAM:
             {
                 n_tasks = n_threads;
             } break;

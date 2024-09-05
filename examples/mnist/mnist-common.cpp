@@ -514,7 +514,7 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
     opt_pars.print_backward_graph = false;
     opt_pars.n_threads = std::thread::hardware_concurrency();
     opt_pars.adam.n_iter = 1; // per call of ggml_opt_resume_g
-    ggml_opt_init(model.ctx_compute, &opt_ctx, opt_pars, 397510);
+    ggml_opt_init(model.ctx_compute, &opt_ctx, opt_pars, 0);
 
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
@@ -530,8 +530,10 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
             ggml_backend_tensor_set(model.images, images + iex0*MNIST_NINPUT,   0, ggml_nbytes(model.images));
             ggml_backend_tensor_set(model.labels, labels + iex0*MNIST_NCLASSES, 0, ggml_nbytes(model.labels));
 
-            enum ggml_opt_result opt_result = ggml_opt_resume_g(model.ctx_compute, &opt_ctx, model.loss, gf, gb, NULL, NULL);
-            GGML_ASSERT(opt_result == GGML_OPT_RESULT_OK || opt_result == GGML_OPT_RESULT_DID_NOT_CONVERGE);
+            const float onef = 1.0f;
+            ggml_backend_graph_compute(model.backend, gf);
+            ggml_backend_tensor_set(model.loss->grad, &onef, 0, sizeof(float));
+            ggml_backend_graph_compute(model.backend, gb);
 
             ggml_backend_tensor_get(model.loss,   &loss,         0, ggml_nbytes(model.loss));
             ggml_backend_tensor_get(model.logits, logits.data(), 0, ggml_nbytes(model.logits));
