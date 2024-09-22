@@ -27,7 +27,7 @@ static_assert(MNIST_NTEST  % MNIST_NBATCH_LOGICAL == 0, "MNIST_NTRAIN % MNIST_NB
 
 struct mnist_model {
     std::string arch;
-    ggml_backend_t backend;
+    std::vector<ggml_backend_t> backends;
     int nbatch_logical;
     int nbatch_physical;
 
@@ -55,20 +55,35 @@ struct mnist_model {
     ggml_backend_buffer_t buf_compute = nullptr;
 
     mnist_model(const std::string & backend_name) {
-        const size_t backend_index = ggml_backend_reg_find_by_name(backend_name.c_str());
-        if (backend_index == SIZE_MAX) {
-            fprintf(stderr, "%s: ERROR: backend %s not found, available:\n", __func__, backend_name.c_str());
-            for (size_t i = 0; i < ggml_backend_reg_get_count(); ++i) {
-                fprintf(stderr, "  - %s\n", ggml_backend_reg_get_name(i));
+        std::vector<std::string> backend_names = {backend_name};
+        if (backend_name != "CPU") {
+            backend_names.push_back("CPU");
+        }
+        for (const std::string & bn : backend_names) {
+            const size_t backend_index = ggml_backend_reg_find_by_name(bn.c_str());
+            if (backend_index == SIZE_MAX) {
+                fprintf(stderr, "%s: ERROR: backend %s not found, available:\n", __func__, bn.c_str());
+                for (size_t i = 0; i < ggml_backend_reg_get_count(); ++i) {
+                    fprintf(stderr, "  - %s\n", ggml_backend_reg_get_name(i));
+                }
+                exit(1);
             }
-            exit(1);
+
+            ggml_backend_t be = ggml_backend_reg_init_backend(backend_index, nullptr);
+            if (ggml_backend_is_cpu(be)) {
+                const int ncores_logical = std::thread::hardware_concurrency();
+                ggml_backend_cpu_set_n_threads(be, std::min(ncores_logical, (ncores_logical + 4)/2));
+            }
+            backends.push_back(be);
         }
 
-        fprintf(stderr, "%s: using %s backend\n", __func__, backend_name.c_str());
-        backend = ggml_backend_reg_init_backend(backend_index, nullptr);
-        if (ggml_backend_is_cpu(backend)) {
-            const int ncores_logical = std::thread::hardware_concurrency();
-            ggml_backend_cpu_set_n_threads(backend, std::min(ncores_logical, (ncores_logical + 4)/2));
+        if (backends.size() == 1) {
+            fprintf(stderr, "%s: using %s backend\n", __func__, ggml_backend_name(backends[0]));
+        } else if (backends.size() == 2) {
+            fprintf(stderr, "%s: using %s as primary backend with %s as fallback\n",
+                    __func__, ggml_backend_name(backends[0]), ggml_backend_name(backends[1]));
+        } else {
+            GGML_ASSERT(false);
         }
 
         {
@@ -99,7 +114,9 @@ struct mnist_model {
 
         ggml_backend_buffer_free(buf_weight);
         ggml_backend_buffer_free(buf_compute);
-        ggml_backend_free(backend);
+        for (ggml_backend_t be : backends) {
+            ggml_backend_free(be);
+        }
     }
 };
 
