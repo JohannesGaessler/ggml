@@ -28,6 +28,7 @@ static_assert(MNIST_NTEST  % MNIST_NBATCH_LOGICAL == 0, "MNIST_NTRAIN % MNIST_NB
 struct mnist_model {
     std::string arch;
     std::vector<ggml_backend_t> backends;
+    ggml_backend_sched_t backend_sched;
     int nbatch_logical;
     int nbatch_physical;
 
@@ -86,6 +87,8 @@ struct mnist_model {
             GGML_ASSERT(false);
         }
 
+        backend_sched = ggml_backend_sched_new(backends.data(), nullptr, backends.size(), GGML_DEFAULT_GRAPH_SIZE, /*parallel =*/ false);
+
         {
             const size_t size_meta = 1024*ggml_tensor_overhead();
             struct ggml_init_params params = {
@@ -114,6 +117,8 @@ struct mnist_model {
 
         ggml_backend_buffer_free(buf_weight);
         ggml_backend_buffer_free(buf_compute);
+
+        ggml_backend_sched_free(backend_sched);
         for (ggml_backend_t be : backends) {
             ggml_backend_free(be);
         }

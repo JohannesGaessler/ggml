@@ -488,7 +488,7 @@ mnist_eval_result mnist_model_eval(mnist_model & model, const float * images, co
     struct ggml_cgraph * gf = ggml_new_graph(model.ctx_compute);
     ggml_build_forward_expand(gf, model.loss);
 
-    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backends[0]);
+    GGML_ASSERT(ggml_backend_sched_alloc_graph(model.backend_sched, gf));
 
     {
         const int64_t t_start_us = ggml_time_us();
@@ -504,7 +504,7 @@ mnist_eval_result mnist_model_eval(mnist_model & model, const float * images, co
             ggml_backend_tensor_set(model.images, images + iex0*MNIST_NINPUT,   0, ggml_nbytes(model.images));
             ggml_backend_tensor_set(model.labels, labels + iex0*MNIST_NCLASSES, 0, ggml_nbytes(model.labels));
 
-            ggml_backend_graph_compute(model.backends[0], gf);
+            ggml_backend_sched_graph_compute(model.backend_sched, gf);
 
             ggml_backend_tensor_get(model.loss,   &loss,         0, ggml_nbytes(model.loss));
             ggml_backend_tensor_get(model.logits, logits.data(), 0, ggml_nbytes(model.logits));
@@ -536,13 +536,13 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
 
     // gb_grad == graph backward gradients, forward pass, then backward pass to calculate gradients.
     struct ggml_cgraph * gb_grad = ggml_graph_dup(model.ctx_compute, gf);
-    ggml_build_backward_expand(model.ctx_compute, gf, gb_grad, /*accumulate =*/ true);
+    ggml_build_backward_expand(model.ctx_compute, gf, gb_grad, /*accumulate =*/ model.nbatch_logical != model.nbatch_physical);
 
     // gb_opt == graph backward optimize, forward pass, then backward pass to calculate gradients, then optimizer step.
     struct ggml_cgraph * gb_opt = ggml_graph_dup(model.ctx_compute, gb_grad);
     ggml_build_opt_adamw(model.ctx_compute, gf, gb_opt, 1e-3f, 0.9f, 0.999f, 1e-8f, 0.0f);
 
-    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backends[0]);
+    GGML_ASSERT(ggml_backend_sched_alloc_graph(model.backend_sched, gb_opt));
     ggml_graph_reset(gb_opt); // Set gradients to zero, reset optimizer.
 
     const int iex_split = ((int)((1.0f - val_split)*nex) / model.nbatch_logical) * model.nbatch_logical;
@@ -563,10 +563,10 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
             // With a period of nbatch_logical/nbatch_physical iterations:
             if ((iex0 + model.nbatch_physical) % model.nbatch_logical != 0) {
                 // For the first nbatch_logical/nbatch_physical - 1 iterations, only calculate gradients and accumulate them:
-                ggml_backend_graph_compute(model.backends[0], gb_grad);
+                ggml_backend_sched_graph_compute(model.backend_sched, gb_grad);
             } else {
                 // For the last iteration, calculate gradients and also apply the optimizer:
-                ggml_backend_graph_compute(model.backends[0], gb_opt); // gb_opt contains all nodes of gb_grad so no extra call for gb_grad is needed.
+                ggml_backend_sched_graph_compute(model.backend_sched, gb_opt); // gb_opt contains all nodes of gb_grad so no extra call for gb_grad is needed.
                 ggml_graph_reset(gb_grad); // Set gradients to zero, do not reset optimizer.
             }
 
@@ -586,7 +586,7 @@ void mnist_model_train(mnist_model & model, const float * images, const float * 
             ggml_backend_tensor_set(model.images, images + iex0*MNIST_NINPUT,   0, ggml_nbytes(model.images));
             ggml_backend_tensor_set(model.labels, labels + iex0*MNIST_NCLASSES, 0, ggml_nbytes(model.labels));
 
-            ggml_backend_graph_compute(model.backends[0], gf); // For the validation set, only the forward pass is needed.
+            ggml_backend_sched_graph_compute(model.backend_sched, gf); // For the validation set, only the forward pass is needed.
 
             ggml_backend_tensor_get(model.loss,   &loss,         0, ggml_nbytes(model.loss));
             ggml_backend_tensor_get(model.logits, logits.data(), 0, ggml_nbytes(model.logits));

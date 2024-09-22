@@ -4099,6 +4099,7 @@ struct ggml_tensor * ggml_set_zero(struct ggml_tensor * tensor) {
     if (tensor->buffer) {
         ggml_backend_tensor_memset(tensor, 0, 0, ggml_nbytes(tensor));
     } else {
+        GGML_ASSERT(tensor->data);
         memset(tensor->data, 0, ggml_nbytes(tensor));
     }
     return tensor;
