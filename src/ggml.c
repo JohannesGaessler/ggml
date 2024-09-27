@@ -2997,10 +2997,11 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
 
     "CROSS_ENTROPY_LOSS",
     "CROSS_ENTROPY_LOSS_BACK",
+    "ACCURACY_COUNT",
     "OPT_STEP_ADAMW",
 };
 
-static_assert(GGML_OP_COUNT == 80, "GGML_OP_COUNT != 80");
+static_assert(GGML_OP_COUNT == 81, "GGML_OP_COUNT != 81");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -3091,10 +3092,11 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
 
     "cross_entropy_loss(x,y)",
     "cross_entropy_loss_back(x,y)",
+    "accuracy_count(x,y)",
     "adamw(x)",
 };
 
-static_assert(GGML_OP_COUNT == 80, "GGML_OP_COUNT != 80");
+static_assert(GGML_OP_COUNT == 81, "GGML_OP_COUNT != 81");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -7710,6 +7712,23 @@ struct ggml_tensor * ggml_cross_entropy_loss_back(
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
+
+    return result;
+}
+
+// ggml_accuracy_count
+
+struct ggml_tensor * ggml_accuracy_count(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * b) {
+    GGML_ASSERT(ggml_are_same_shape(a, b));
+
+    struct ggml_tensor * result = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 1);
+
+    result->op     = GGML_OP_ACCURACY_COUNT;
+    result->src[0] = a;
+    result->src[1] = b;
 
     return result;
 }
@@ -16709,10 +16728,13 @@ static void ggml_compute_forward_cross_entropy_loss_f32(
     const struct ggml_tensor * src0 = dst->src[0];
     const struct ggml_tensor * src1 = dst->src[1];
 
-    GGML_ASSERT(ggml_is_contiguous(src0));
-    GGML_ASSERT(ggml_is_contiguous(src1));
-    GGML_ASSERT(ggml_is_scalar(dst));
+    GGML_ASSERT(src0->type == GGML_TYPE_F32);
+    GGML_ASSERT(src1->type == GGML_TYPE_F32);
+    GGML_ASSERT(src0->nb[0] == ggml_type_size(src0->type));
+    GGML_ASSERT(src1->nb[0] == ggml_type_size(src1->type));
     GGML_ASSERT(ggml_are_same_shape(src0, src1));
+    GGML_ASSERT(ggml_is_scalar(dst));
+    GGML_ASSERT(dst->type == GGML_TYPE_F32);
 
     // TODO: handle transposed/permuted matrices
     const int64_t nc = src0->ne[0];
@@ -16723,7 +16745,7 @@ static void ggml_compute_forward_cross_entropy_loss_f32(
 
     float * sums =  (float *) params->wdata;
     float * st   = ((float *) params->wdata) + nth + ith*nc;
-    sums[ith] = 0.0f;
+    float sum_thread = 0.0f;
 
     GGML_ASSERT(params->wsize >= sizeof(float) * (nth + nth * nc));
 
@@ -16748,15 +16770,15 @@ static void ggml_compute_forward_cross_entropy_loss_f32(
 
         float max = -INFINITY;
         ggml_vec_max_f32(nc, &max, s0);
-        const ggml_float sum = ggml_vec_log_soft_max_f32(nc, st, s0, max);
-        assert(sum >= 0.0);
+        const ggml_float sum_softmax = ggml_vec_log_soft_max_f32(nc, st, s0, max);
+        assert(sum_softmax >= 0.0);
 
-        ggml_vec_add1_f32(nc, st, st, -sum);
+        ggml_vec_add1_f32(nc, st, st, -sum_softmax);
         ggml_vec_mul_f32(nc, st, st, s1);
 
-        float st_sum = 0.0f;
-        ggml_vec_sum_f32(nc, &st_sum, st);
-        sums[ith] += st_sum;
+        float sum_st = 0.0f;
+        ggml_vec_sum_f32(nc, &sum_st, st);
+        sum_thread += sum_st;
 
 #ifndef NDEBUG
         for (int64_t i = 0; i < nc; ++i) {
@@ -16857,6 +16879,8 @@ static void ggml_compute_forward_cross_entropy_loss_back_f32(
     }
 }
 
+// ggml_compute_forward_cross_entropy_loss_back
+
 static void ggml_compute_forward_cross_entropy_loss_back(
         const struct ggml_compute_params * params,
         struct ggml_tensor * dst) {
@@ -16867,6 +16891,92 @@ static void ggml_compute_forward_cross_entropy_loss_back(
         case GGML_TYPE_F32:
             {
                 ggml_compute_forward_cross_entropy_loss_back_f32(params, dst);
+            } break;
+        default:
+            {
+                GGML_ABORT("fatal error");
+            }
+    }
+}
+
+// ggml_compute_forward_accuracy_count
+
+static void ggml_compute_forward_accuracy_count_f32(
+        const struct ggml_compute_params * params,
+        struct ggml_tensor * dst) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+
+    GGML_ASSERT(src0->type == GGML_TYPE_F32);
+    GGML_ASSERT(src1->type == GGML_TYPE_F32);
+    GGML_ASSERT(src0->nb[0] == ggml_type_size(src0->type));
+    GGML_ASSERT(src1->nb[0] == ggml_type_size(src1->type));
+    GGML_ASSERT(ggml_are_same_shape(src0, src1));
+    GGML_ASSERT(ggml_is_scalar(dst));
+    GGML_ASSERT(dst->type == GGML_TYPE_I64);
+
+    const int64_t nc = src0->ne[0];
+    const int64_t nr = ggml_nrows(src0);
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    int64_t * sums = (int64_t *) params->wdata;
+    int64_t sum_thread = 0;
+
+    GGML_ASSERT(params->wsize >= sizeof(float) * (nth + nth * nc));
+
+    // rows per thread
+    const int64_t dr = (nr + nth - 1)/nth;
+
+    // row range for this thread
+    const int64_t ir0 = dr*ith;
+    const int64_t ir1 = MIN(ir0 + dr, nr);
+
+    for (int64_t i1 = ir0; i1 < ir1; i1++) {
+        const float * s0 = (const float *)((const char *) src0->data + i1*src0->nb[1]);
+        const float * s1 = (const float *)((const char *) src1->data + i1*src1->nb[1]);
+
+#ifndef NDEBUG
+        for (int64_t i = 0; i < nc; ++i) {
+            //printf("p[%d] = %f\n", i, p[i]);
+            assert(!isnan(s0[i]));
+            assert(!isnan(s1[i]));
+        }
+#endif
+
+        int argmax0;
+        int argmax1;
+        ggml_vec_argmax_f32(nc, &argmax0, s0);
+        ggml_vec_argmax_f32(nc, &argmax1, s1);
+        sum_thread += argmax0 == argmax1;
+    }
+
+    if (ith != 0) {
+        sums[ith] = sum_thread;
+    }
+    ggml_barrier(params->threadpool);
+    if (ith != 0) {
+        return;
+    }
+
+    for (int ith_other = 1; ith_other < nth; ++ith_other) {
+        sum_thread += sums[ith_other];
+    }
+    *((int64_t *) dst->data) = sum_thread;
+}
+
+static void ggml_compute_forward_accuracy_count(
+        const struct ggml_compute_params * params,
+        struct ggml_tensor * dst) {
+
+    const struct ggml_tensor * src0 = dst->src[0];
+
+    switch (src0->type) {
+        case GGML_TYPE_F32:
+            {
+                ggml_compute_forward_accuracy_count_f32(params, dst);
             } break;
         default:
             {
@@ -17306,6 +17416,11 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
         case GGML_OP_CROSS_ENTROPY_LOSS_BACK:
             {
                 ggml_compute_forward_cross_entropy_loss_back(params, tensor);
+            }
+            break;
+        case GGML_OP_ACCURACY_COUNT:
+            {
+                ggml_compute_forward_accuracy_count(params, tensor);
             }
             break;
         case GGML_OP_OPT_STEP_ADAMW:
@@ -18463,6 +18578,10 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_tensor 
             {
                 GGML_ABORT("fatal error"); // not supported
             }
+        case GGML_OP_ACCURACY_COUNT:
+            {
+                GGML_ABORT("fatal error"); // not supported
+            }
         case GGML_OP_OPT_STEP_ADAMW:
             {
                 GGML_ABORT("fatal error"); // not supported
@@ -19114,6 +19233,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
             } break;
         case GGML_OP_CROSS_ENTROPY_LOSS:
         case GGML_OP_CROSS_ENTROPY_LOSS_BACK:
+        case GGML_OP_ACCURACY_COUNT:
         case GGML_OP_OPT_STEP_ADAMW:
             {
                 n_tasks = n_threads;
@@ -19560,6 +19680,10 @@ struct ggml_cplan ggml_graph_plan(
             case GGML_OP_CROSS_ENTROPY_LOSS:
                 {
                     cur = ggml_type_size(node->type)*(n_tasks + node->src[0]->ne[0]*n_tasks);
+                } break;
+            case GGML_OP_ACCURACY_COUNT:
+                {
+                    cur = ggml_type_size(node->type)*n_tasks;
                 } break;
             case GGML_OP_COUNT:
                 {

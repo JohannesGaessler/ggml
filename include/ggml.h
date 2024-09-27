@@ -534,6 +534,7 @@ extern "C" {
 
         GGML_OP_CROSS_ENTROPY_LOSS,
         GGML_OP_CROSS_ENTROPY_LOSS_BACK,
+        GGML_OP_ACCURACY_COUNT,
         GGML_OP_OPT_STEP_ADAMW,
 
         GGML_OP_COUNT,
@@ -2042,6 +2043,11 @@ extern "C" {
             struct ggml_tensor  * a,  // logits
             struct ggml_tensor  * b,  // labels
             struct ggml_tensor  * c); // gradients of cross_entropy_loss result
+
+    GGML_API struct ggml_tensor * ggml_accuracy_count(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * a,  // logits
+            struct ggml_tensor  * b); // labels
 
     // AdamW optimizer step
     // Paper: https://arxiv.org/pdf/1711.05101v3.pdf
