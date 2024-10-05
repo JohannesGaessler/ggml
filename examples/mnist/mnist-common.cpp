@@ -1,6 +1,7 @@
+#include "ggml.h"
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
-#include "ggml.h"
+#include "ggml-opt.h"
 
 #include "mnist-common.h"
 
@@ -567,16 +568,9 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     ggml_build_forward_expand(gf, model.pred);
     ggml_build_forward_expand(gf, model.acc_count);
 
-    // gb_grad == graph backward gradients, forward pass, then backward pass to calculate gradients.
-    struct ggml_cgraph * gb_grad = ggml_graph_dup(model.ctx_compute, gf);
-    ggml_build_backward_expand(model.ctx_compute, gf, gb_grad, /*accumulate =*/ opt_period > 1);
-
-    // gb_opt == graph backward optimize, forward pass, then backward pass to calculate gradients, then optimizer step.
-    struct ggml_cgraph * gb_opt = ggml_graph_dup(model.ctx_compute, gb_grad);
-    ggml_build_opt_adamw(model.ctx_compute, gf, gb_opt, 1e-3f, 0.9f, 0.999f, 1e-8f, 0.0f);
-
-    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
-    ggml_graph_reset(gb_opt); // Set gradients to zero, reset optimizer.
+    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, gf);
+    params.opt_period = model.nbatch_logical / model.nbatch_physical;
+    ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
 
     dataset.shuffle(-1); // Shuffle all data (train + validation).
 
@@ -600,15 +594,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
         for (; ibatch_physical < ibatch_split; ++ibatch_physical) {
             dataset.get_batch(model.images, model.labels, ibatch_physical);
 
-            // With a period of opt_period == nbatch_logical/nbatch_physical iterations:
-            if ((ibatch_physical + 1) % opt_period != 0) {
-                // For the first opt_period - 1 iterations, only calculate gradients and accumulate them:
-                ggml_backend_graph_compute(model.backend, gb_grad);
-            } else {
-                // For the last iteration, calculate gradients and also apply the optimizer:
-                ggml_backend_graph_compute(model.backend, gb_opt); // gb_opt contains all nodes of gb_grad so no extra call for gb_grad is needed.
-                ggml_graph_reset(gb_grad); // Set gradients to zero, do not reset optimizer.
-            }
+            ggml_opt_new_forward_backward(opt_ctx);
 
             ggml_backend_tensor_get(model.loss,      &tmp_loss,       0, ggml_nbytes(model.loss));
             ggml_backend_tensor_get(model.pred,      tmp_pred.data(), 0, ggml_nbytes(model.pred));
@@ -624,7 +610,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
         for (; ibatch_physical < nbatches_physical; ++ibatch_physical) {
             dataset.get_batch(model.images, model.labels, ibatch_physical);
 
-            ggml_backend_graph_compute(model.backend, gf); // For the validation set, only the forward pass is needed.
+            ggml_opt_new_forward(opt_ctx);
 
             ggml_backend_tensor_get(model.loss,      &tmp_loss,       0, ggml_nbytes(model.loss));
             ggml_backend_tensor_get(model.pred,      tmp_pred.data(), 0, ggml_nbytes(model.pred));
@@ -665,6 +651,8 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     } else {
         fprintf(stderr, "%s: not saving the GGML graph for the forward pass because this is only supported for the CPU backend\n", __func__);
     }
+
+    ggml_opt_new_free(opt_ctx);
 }
 
 void mnist_model_save(mnist_model & model, const std::string & fname) {
