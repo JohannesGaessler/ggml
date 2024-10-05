@@ -1982,6 +1982,8 @@ extern "C" {
             struct ggml_context * ctx,
             struct ggml_tensor  * a,
             struct ggml_tensor  * grad,
+            struct ggml_tensor  * m,
+            struct ggml_tensor  * v,
             float                 alpha,
             float                 beta1,
             float                 beta2,
@@ -1992,18 +1994,13 @@ extern "C" {
     // automatic differentiation
     //
 
-    GGML_API void ggml_build_forward_expand (struct ggml_cgraph * cgraph, struct ggml_tensor * tensor);
-    GGML_API void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * gf, struct ggml_cgraph * gb, bool accumulate);
-
-    GGML_API void ggml_build_opt_adamw(
-            struct ggml_context * ctx,
-            struct ggml_cgraph  * gf,
-            struct ggml_cgraph  * gb,
-            float                 alpha,
-            float                 beta1,
-            float                 beta2,
-            float                 eps,
-            float                 wd); // weight decay
+    GGML_API void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor * tensor);
+    GGML_API void ggml_build_backward_expand(
+        struct ggml_context * ctx_static,  // context for gradient accumulation
+        struct ggml_context * ctx_compute, // context for gradient computation
+        struct ggml_cgraph  * gf,
+        struct ggml_cgraph  * gb,
+        bool                  accumulate); // whether or not gradients should be accumulated, requires static allocation of tensors in ctx_static
 
     // graph allocation in a context
     GGML_API struct ggml_cgraph * ggml_new_graph       (struct ggml_context * ctx); // size = GGML_DEFAULT_GRAPH_SIZE, grads = false

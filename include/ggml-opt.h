@@ -1,0 +1,195 @@
+// This file contains functionality for training models using GGML.
+// It is not strictly needed vs. just vanilla GGML but it provides a more high-level interface for common needs such as datasets.
+// At the bottom of this file especially there are relatively high-level functions that are suitable use or adaptation in user code.
+
+#pragma once
+
+#include "ggml.h"
+#include "ggml-backend.h"
+
+#include <stdint.h>
+
+#ifdef  __cplusplus
+extern "C" {
+#endif
+
+    struct ggml_opt_new_dataset;
+    struct ggml_opt_new_context;
+    struct ggml_opt_new_result;
+
+    // ====== Loss ======
+
+    // built-in loss types the quantity minimized by the optimizer
+    // custom loss types can be defined via mean or sum which reduce the outputs for all datapoints to a single value
+    enum ggml_opt_new_loss_type {
+        GGML_OPT_NEW_LOSS_TYPE_MEAN,
+        GGML_OPT_NEW_LOSS_TYPE_SUM,
+        GGML_OPT_NEW_LOSS_TYPE_CROSS_ENTROPY,
+        GGML_OPT_NEW_LOSS_TYPE_MEAN_SQUARED_ERROR,
+    };
+
+    // ====== Dataset ======
+
+    GGML_API struct ggml_opt_new_dataset * ggml_opt_new_dataset_init(
+            int64_t ne_datapoint, // number of elements per datapoint
+            int64_t ne_label,     // number of elements per label
+            int64_t ndata,        // total number of datapoints/labels
+            int64_t ndata_shard); // number of datapoints/labels per shard (unit at which the dataset is shuffled/copied)
+    GGML_API void ggml_opt_new_dataset_free(struct ggml_opt_new_dataset * dataset);
+
+    // get underlying tensors that store the data
+    GGML_API struct ggml_tensor * ggml_opt_new_dataset_data  (struct ggml_opt_new_dataset * dataset); // shape = [ne_datapoint, ndata]
+    GGML_API struct ggml_tensor * ggml_opt_new_dataset_labels(struct ggml_opt_new_dataset * dataset); // shape = [nd_label,     ndata]
+
+    // shuffle idata first datapoints from dataset with RNG from opt_ctx, shuffle all datapoints if idata is negative
+    GGML_API void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, int64_t idata);
+
+    // get batch at position ibatch from dataset and copy the data to data_batch and labels_batch
+    GGML_API void ggml_opt_new_dataset_get_batch(
+            struct ggml_opt_new_dataset * dataset,
+            struct ggml_tensor          * data_batch,   // shape = [ne_datapoint, ndata_batch]
+            struct ggml_tensor          * labels_batch, // shape = [ne_label,     ndata_batch]
+            int64_t                       ibatch);
+
+    // ====== Model / Context ======
+
+    // parameters that control which optimizer is used and how said optimizer tries to find the minimal loss
+    struct ggml_opt_new_optimizer_params {
+        // AdamW optimizer parameters
+        struct {
+            float alpha; // learning rate
+            float beta1;
+            float beta2;
+            float eps;   // epsilon for numerical stability
+            float wd;    // weight decay for AdamW, use 0.0f to disable
+        } adamw;
+    };
+
+    struct ggml_opt_new_optimizer_params ggml_opt_new_default_optimizer_params();
+
+    // parameters for initializing a new optimization context
+    struct ggml_opt_new_params {
+        ggml_backend_sched_t backend_sched;
+
+        struct ggml_context * ctx_compute;
+
+        // the forward graph is defined by inputs and outputs
+        // those tensors and all tensors inbetween are not intended to be reusable between multiple optimization contexts
+        struct ggml_tensor * inputs;
+        struct ggml_tensor * outputs;
+
+        enum ggml_opt_new_loss_type loss_type;
+
+        bool    forward_only; // whether or not only the forward graph should be allocated (saves memory)
+        int32_t opt_period;   // after how many gradient accumulation steps an optimizer step should be done
+
+        ggml_opt_new_optimizer_params optimizer_params;
+    };
+
+    // get parameters for an optimization context with defaults set where possible
+    // parameters for which no sensible defaults exist are supplied as arguments to this function
+    GGML_API ggml_opt_new_params ggml_opt_new_default_params(
+            ggml_backend_sched_t          backend_sched,
+            struct ggml_context         * ctx_compute,
+            struct ggml_tensor          * inputs,
+            struct ggml_tensor          * outputs,
+            enum ggml_opt_new_loss_type   loss_type);
+
+    GGML_API struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params params);
+    GGML_API void ggml_opt_new_free(struct ggml_opt_new_context * opt_ctx);
+
+    // set gradients to zero, initilize loss, and optionally reset the optimizer
+    GGML_API void ggml_opt_new_reset(struct ggml_opt_new_context * opt_ctx, bool optimizer);
+
+    // get underlying tensors that store data
+    GGML_API struct ggml_tensor * ggml_opt_new_inputs(  struct ggml_opt_new_context * opt_ctx); // forward graph input tensor
+    GGML_API struct ggml_tensor * ggml_opt_new_outputs( struct ggml_opt_new_context * opt_ctx); // forward graph output tensor
+    GGML_API struct ggml_tensor * ggml_opt_new_labels(  struct ggml_opt_new_context * opt_ctx); // labels to compare outputs against
+    GGML_API struct ggml_tensor * ggml_opt_new_loss(    struct ggml_opt_new_context * opt_ctx); // scalar tensor that contains the loss
+    GGML_API struct ggml_tensor * ggml_opt_new_pred(    struct ggml_opt_new_context * opt_ctx); // predictions made by outputs
+    GGML_API struct ggml_tensor * ggml_opt_new_ncorrect(struct ggml_opt_new_context * opt_ctx); // number of matching predictions between outputs and labels
+
+    // ====== Optimization Result ======
+
+    GGML_API struct ggml_opt_new_result * ggml_opt_new_result_init();
+    GGML_API void ggml_opt_new_result_free(struct ggml_opt_new_result * result);
+    GGML_API void ggml_opt_new_result_reset(struct ggml_opt_new_result * result);
+
+    // get data from result, uncertainties are optional and can be ignored by passing NULL
+    GGML_API void ggml_opt_new_result_ndata(   struct ggml_opt_new_result * result, int64_t * ndata);                  // write 1 value, number of datapoints
+    GGML_API void ggml_opt_new_result_loss(    struct ggml_opt_new_result * result, double  * loss,     double * unc); // write 1 value
+    GGML_API void ggml_opt_new_result_pred(    struct ggml_opt_new_result * result, int32_t * pred);                   // write ndata values
+    GGML_API void ggml_opt_new_result_accuracy(struct ggml_opt_new_result * result, double  * accuracy, double * unc); // write 1 value
+
+    // ====== Computation ======
+
+    // do forward pass, increment result if not NULL
+    GGML_API void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_result  * result);
+
+    // do forward pass, increment result if not NULL, do backward pass
+    GGML_API void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_result * result);
+
+    // ############################################################################
+    // ## The high-level functions start here. They do not depend on any private ##
+    // ## functions or structs and can be copied to and adapted for user code.   ##
+    // ############################################################################
+
+    // ====== Intended Usage ======
+    //
+    // 1. Select the appropriate loss for your problem.
+    // 2. Create a dataset and set the data for the "data" tensor. Also set the "labels" tensor if your loss needs them.
+    //    Setting the shard size to 1 will be fine, it's the granularity with which data is shuffled/loaded (bigger values are faster).
+    // 3. Create a GGML graph for your model with no_alloc == true. Use two separate contexts for the tensors.
+    //    The first context should contain the model parameters and inputs and be allocated statically in user code.
+    //    The second context should contain all other tensors and will be (re)allocated automatically.
+    //    Due to this automated allocation the data of the second context is not defined when accessed in user code.
+    //    Note that the second dimension of the inputs/outputs are interpreted as the number of datapoints in those tensors.
+    // 4. Call ggml_opt_fit. If you need more control you can use ggml_opt_epoch instead.
+
+    // signature for a callback while evaluating opt_ctx on dataset, called after an evaluation
+    typedef void (*ggml_opt_new_epoch_callback)(
+            bool                          train,       // true after training evaluation, false after validation evaluation
+            struct ggml_opt_new_context * opt_ctx,
+            struct ggml_opt_new_dataset * dataset,
+            struct ggml_opt_new_result  * result,      // result associated with the dataset subsection
+            int64_t                       ibatch,      // number of batches that have been evaluated so far
+            int64_t                       ibatch_max,  // total number of batches in this dataset subsection
+            int64_t                       t_start_us); // time at which the evaluation on the dataset subsection was started
+
+    // do training on front of dataset, do evaluation only on back of dataset
+    GGML_API void ggml_opt_new_epoch(
+            struct ggml_opt_new_context * opt_ctx,
+            struct ggml_opt_new_dataset * dataset,
+            struct ggml_opt_new_result  * result_train,   // result to increment during training, ignored if NULL
+            struct ggml_opt_new_result  * result_eval,    // result to increment during evaluation, ignored if NULL
+            int64_t                       idata_split,    // data index at which to split training and evaluation
+            ggml_opt_new_epoch_callback   callback_train,
+            ggml_opt_new_epoch_callback   callback_eval);
+
+    // callback that prints a progress bar on stderr
+    GGML_API void ggml_opt_new_epoch_callback_progress_bar(
+            bool                          train,
+            struct ggml_opt_new_context * opt_ctx,
+            struct ggml_opt_new_dataset * dataset,
+            struct ggml_opt_new_result  * result,
+            int64_t                       ibatch,
+            int64_t                       ibatch_max,
+            int64_t                       t_start_us);
+
+    // fit model defined by inputs and outputs to dataset
+    GGML_API void ggml_opt_new_fit(
+            ggml_backend_sched_t            backend_sched,    // backend scheduler for constructing the compute graphs
+            ggml_context                  * ctx_compute,      // context with temporarily allocated tensors to calculate the outputs
+            ggml_tensor                   * inputs,           // input tensor with shape [ne_datapoint, ndata_batch]
+            ggml_tensor                   * outputs,          // output tensor, must have shape [ne_label, ndata_batch] if labels are used
+            ggml_opt_new_dataset          * dataset,          // dataset with data and optionally also labels
+            enum ggml_opt_new_loss_type     loss_type,        // loss to minimize
+            ggml_opt_new_optimizer_params   optimizer_params, // how the optimizer should minimize the loss
+            int64_t                         nepoch,           // how many times the dataset should be iterated over
+            int64_t                         nbatch_logical,   // datapoints optimizer step, must be a multiple of ndata_batch in inputs/outputs
+            float                           val_split,        // fraction of the dataset to use for validation, must be in [0.0f, 1.0f)
+            bool                            silent);          // whether or not info prints to stderr should be suppressed
+
+#ifdef  __cplusplus
+}
+#endif

@@ -279,7 +279,7 @@ void ggml_backend_tensor_get(const struct ggml_tensor * tensor, void * data, siz
     buf->iface.get_tensor(buf, tensor, data, offset, size);
 }
 
-GGML_API void ggml_backend_tensor_memset(struct ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
+void ggml_backend_tensor_memset(struct ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
     ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
 
     if (size == 0) {
@@ -292,6 +292,14 @@ GGML_API void ggml_backend_tensor_memset(struct ggml_tensor * tensor, uint8_t va
     GGML_ASSERT(buf->iface.memset_tensor != NULL && "memset not implemented by backend buffer");
 
     buf->iface.memset_tensor(buf, tensor, value, offset, size);
+}
+
+void ggml_backend_tensor_reset(struct ggml_tensor * tensor) {
+    // the allocation/deallocation of the memory that these pointers point to is not the responsibility of ggml_tensor
+    // they can therefore simply be cleared without creating a memory leak
+    tensor->data   = nullptr;
+    tensor->buffer = nullptr;
+    tensor->extra  = nullptr;
 }
 
 void ggml_backend_synchronize(ggml_backend_t backend) {

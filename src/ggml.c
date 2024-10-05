@@ -4938,6 +4938,8 @@ struct ggml_tensor * ggml_opt_step_adamw(
         struct ggml_context * ctx,
         struct ggml_tensor  * a,
         struct ggml_tensor  * grad,
+        struct ggml_tensor  * m,
+        struct ggml_tensor  * v,
         float                 alpha,
         float                 beta1,
         float                 beta2,
@@ -4945,6 +4947,8 @@ struct ggml_tensor * ggml_opt_step_adamw(
         float                 wd) {
     GGML_ASSERT(a->flags & GGML_TENSOR_FLAG_PARAM);
     GGML_ASSERT(ggml_are_same_shape(a, grad));
+    GGML_ASSERT(ggml_are_same_shape(a, m));
+    GGML_ASSERT(ggml_are_same_shape(a, v));
     GGML_ASSERT(alpha >  0.0f);
     GGML_ASSERT(beta1 >= 0.0f && beta1 <= 1.0f);
     GGML_ASSERT(beta2 >= 0.0f && beta2 <= 1.0f);
@@ -4964,8 +4968,8 @@ struct ggml_tensor * ggml_opt_step_adamw(
     result->op     = GGML_OP_OPT_STEP_ADAMW;
     result->src[0] = a;
     result->src[1] = grad;
-    result->src[2] = ggml_dup_tensor(ctx, grad);
-    result->src[3] = ggml_dup_tensor(ctx, grad);
+    result->src[2] = m;
+    result->src[3] = v;
 
     return result;
 }
@@ -5113,7 +5117,7 @@ void ggml_build_backward_gradient_checkpointing(
         struct ggml_tensor  * * checkpoints,
         int                     n_checkpoints) {
     ggml_graph_cpy(gf, gb_tmp);
-    ggml_build_backward_expand(ctx, gf, gb_tmp, false);
+    ggml_build_backward_expand(ctx, ctx, gf, gb_tmp, false);
 
     if (n_checkpoints <= 0) {
         ggml_graph_cpy(gb_tmp, gb);
@@ -5321,11 +5325,11 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_tensor 
                                 zero_table, acc_table);
                 }
                 if (src1->grad) {
-                    src1->grad =
-                        ggml_add_or_set(ctx,
-                                src1->grad,
-                                ggml_mul(ctx, src0, tensor->grad),
-                                zero_table, acc_table);
+                    struct ggml_tensor * tmp = ggml_mul(ctx, src0, tensor->grad);
+                    if (!ggml_are_same_shape(src0, src1)) {
+                        tmp = ggml_repeat_back(ctx, tmp, src1);
+                    }
+                    src1->grad = ggml_add_or_set(ctx, src1->grad, tmp, zero_table, acc_table);
                 }
             } break;
         case GGML_OP_DIV:
@@ -5432,6 +5436,14 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_tensor 
                 }
             } break;
         case GGML_OP_MEAN:
+            {
+                if (src0->grad) {
+                    src0->grad = ggml_add1_or_set(ctx,
+                        src0->grad,
+                        ggml_scale_impl(ctx, tensor->grad, 1.0f/src0->ne[0], false),
+                        zero_table, acc_table);
+                }
+            } break;
         case GGML_OP_ARGMAX:
         case GGML_OP_COUNT_EQUAL:
             {
@@ -6200,10 +6212,16 @@ void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor *
     ggml_build_forward_impl(cgraph, tensor, true);
 }
 
-void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * gf, struct ggml_cgraph * gb, bool accumulate) {
+void ggml_build_backward_expand(
+        struct ggml_context * ctx_static,
+        struct ggml_context * ctx_compute,
+        struct ggml_cgraph  * gf,
+        struct ggml_cgraph  * gb,
+        bool                  accumulate) {
     GGML_ASSERT(gf->n_nodes > 0);
     GGML_ASSERT(gf->grads);
 
+    bool any_grads = false;
     for (int i = 0; i < gf->n_nodes; ++i) {
         struct ggml_tensor * node = gf->nodes[i];
 
@@ -6255,8 +6273,12 @@ void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * 
             node->op == GGML_OP_RESHAPE || node->op == GGML_OP_PERMUTE || node->op == GGML_OP_TRANSPOSE);
 
         // create a new tensor with the same type and shape as the node and set it as grad
-        node->grad = ggml_dup_tensor(ctx, node);
+        node->grad = ggml_dup_tensor(
+            (accumulate && (node->flags & GGML_TENSOR_FLAG_PARAM)) || (node->flags & GGML_TENSOR_FLAG_LOSS) ?
+            ctx_static : ctx_compute, node);
+        any_grads = true;
     }
+    GGML_ASSERT(any_grads && "no tensor was given gradients, did you forget to call ggml_set_param?");
 
     // keep tables of original gradients for replacement/accumulation logic
     struct ggml_hash_set zero_table = ggml_hash_set_new(gf->size);
@@ -6286,7 +6308,7 @@ void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * 
         // inplace operations to add gradients are not created by ggml_compute_backward except for gradient accumulation
         // use allocator to automatically make inplace operations
         if (node->grad) {
-            ggml_compute_backward(ctx, node, &zero_table, &acc_table);
+            ggml_compute_backward(ctx_compute, node, &zero_table, &acc_table);
         }
     }
 
@@ -6301,26 +6323,6 @@ void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * 
 
     ggml_hash_set_free(&zero_table);
     ggml_hash_set_free(&acc_table);
-}
-
-void ggml_build_opt_adamw(
-        struct ggml_context * ctx,
-        struct ggml_cgraph  * gf,
-        struct ggml_cgraph  * gb,
-        float                 alpha,
-        float                 beta1,
-        float                 beta2,
-        float                 eps,
-        float                 wd) {
-    for (int i = 0; i < gf->n_nodes; i++) {
-        struct ggml_tensor * node = gf->nodes[i];
-
-        if (node->flags & GGML_TENSOR_FLAG_PARAM) {
-            GGML_PRINT_DEBUG("%s: found root node %p\n", __func__, (void *) node);
-            struct ggml_tensor * opt_step = ggml_opt_step_adamw(ctx, node, node->grad, alpha, beta1, beta2, eps, wd);
-            ggml_build_forward_expand(gb, opt_step);
-        }
-    }
 }
 
 static void * incr_ptr_aligned(void ** p, size_t size, size_t align) {
@@ -6466,7 +6468,7 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         struct ggml_tensor * node = cgraph->nodes[i];
 
         // initial gradients of loss should be 1, 0 otherwise
-        if (node->grad) {
+        if (node->grad && node->grad->data) {
             if (node->flags & GGML_TENSOR_FLAG_LOSS) {
                 GGML_ASSERT(node->grad->buffer);
                 GGML_ASSERT(node->type == GGML_TYPE_F32);
@@ -6483,8 +6485,12 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         if (node->op == GGML_OP_OPT_STEP_ADAMW) {
             // set iteration to 1 and clear momenta
             ggml_set_op_params_i32(node, 0, 1);
-            ggml_set_zero(node->src[2]);
-            ggml_set_zero(node->src[3]);
+            if (node->src[2]->data) {
+                ggml_set_zero(node->src[2]);
+            }
+            if (node->src[3]->data) {
+                ggml_set_zero(node->src[3]);
+            }
         }
     }
 }

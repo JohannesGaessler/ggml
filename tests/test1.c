@@ -32,7 +32,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, f);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x, 2.0f);
         ggml_set_f32(a, 3.0f);
@@ -84,7 +84,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_graph_reset(gf);
         ggml_set_f32(y->grad, 1.0f);
@@ -104,7 +104,7 @@ int main(int argc, const char ** argv) {
 
         struct ggml_cgraph * gbb = ggml_graph_dup(ctx0, gb);
 
-        ggml_build_backward_expand(ctx0, gb, gbb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gb, gbb, false);
 
         ggml_graph_reset(gb);
         ggml_set_f32(g1->grad, 1.0f);
@@ -135,7 +135,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x1, 3.0f);
         ggml_set_f32(x2, 4.0f);
@@ -173,7 +173,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x1, 1.0f);
         ggml_set_f32(x2, 2.0f);
@@ -200,7 +200,7 @@ int main(int argc, const char ** argv) {
 
         struct ggml_cgraph * gbb = ggml_graph_dup(ctx0, gb);
 
-        ggml_build_backward_expand(ctx0, gb, gbb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gb, gbb, false);
 
         ggml_graph_reset(gb);
         ggml_set_f32(g1->grad, 1.0f);
@@ -236,7 +236,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x1, 3.0f);
         ggml_set_f32(x2, 5.0f);
@@ -291,7 +291,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x1, 3.0f);
         ggml_set_f32(x2, 5.0f);
@@ -346,7 +346,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x1, 3.0f);
         ggml_set_f32(x2, 5.0f);
@@ -395,7 +395,7 @@ int main(int argc, const char ** argv) {
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
         ggml_build_forward_expand(gf, y);
         struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-        ggml_build_backward_expand(ctx0, gf, gb, false);
+        ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
 
         ggml_set_f32(x1, 3.0f);
         ggml_set_f32(x2, 5.0f);
