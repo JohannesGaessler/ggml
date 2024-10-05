@@ -11,6 +11,7 @@ extern "C" {
         ggml_backend_t backend;
         struct ggml_cgraph * gf;
 
+        bool forward_only;
         int32_t opt_period;
 
         // AdamW optimizer parameters

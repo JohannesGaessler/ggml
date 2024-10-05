@@ -23,6 +23,7 @@ struct ggml_opt_new_params ggml_opt_new_default_params(
     return {
         /*backend    =*/ backend,
         /*gf         =*/ gf,
+        /*forward_only =*/ false,
         /*opt_period =*/ 1,
         /*adamw      =*/ {
             /*alpha      =*/ 0.001f,
@@ -36,8 +37,9 @@ struct ggml_opt_new_params ggml_opt_new_default_params(
 
 struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params params) {
     struct ggml_opt_new_context * result = new struct ggml_opt_new_context;
-    result->backend = params.backend;
-    result->opt_i = 0;
+    result->backend    = params.backend;
+    result->opt_period = params.opt_period;
+    result->opt_i      = 0;
 
     {
         // The compute context needs a total of 3 compute graphs: forward pass + backwards pass (with/without optimizer step).
@@ -51,6 +53,15 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     }
 
     result->gf = ggml_graph_dup(result->ctx, params.gf);
+
+    if (params.forward_only) {
+        result->gb_grad = nullptr;
+        result->gb_opt  = nullptr;
+
+        ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
+
+        return result;
+    }
 
     // gb_grad == graph backward gradients, forward pass, then backward pass to calculate gradients.
     result->gb_grad = ggml_graph_dup(result->ctx, result->gf);
@@ -86,6 +97,8 @@ void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx) {
 }
 
 void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx) {
+    GGML_ASSERT(opt_ctx->gb_grad);
+    GGML_ASSERT(opt_ctx->gb_opt);
     if (opt_ctx->opt_period == 1) {
         ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gb_opt);
         return;

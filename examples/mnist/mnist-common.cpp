@@ -514,6 +514,10 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
 
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
+    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, gf);
+    params.forward_only = true;
+    ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
+
     {
         const int64_t t_start_us = ggml_time_us();
 
@@ -530,7 +534,7 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
         for (int ibatch = 0; ibatch < nbatches; ++ibatch) {
             dataset.get_batch(model.images, model.labels, ibatch);
 
-            ggml_backend_graph_compute(model.backend, gf);
+            ggml_opt_new_forward(opt_ctx);
 
             ggml_backend_tensor_get(model.loss,      &tmp_loss,       0, ggml_nbytes(model.loss));
             ggml_backend_tensor_get(model.pred,      tmp_pred.data(), 0, ggml_nbytes(model.pred));
@@ -567,6 +571,8 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     ggml_build_forward_expand(gf, model.loss);
     ggml_build_forward_expand(gf, model.pred);
     ggml_build_forward_expand(gf, model.acc_count);
+
+    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
     ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, gf);
     params.opt_period = model.nbatch_logical / model.nbatch_physical;
