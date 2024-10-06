@@ -7,6 +7,7 @@
 
 struct ggml_opt_new_context {
     ggml_backend_t backend;
+    ggml_backend_buffer_t buf;
     struct ggml_context * ctx;
 
     struct ggml_tensor * inputs;
@@ -28,13 +29,11 @@ struct ggml_opt_new_context {
 struct ggml_opt_new_params ggml_opt_new_default_params(
         ggml_backend_t       backend,
         struct ggml_tensor * inputs,
-        struct ggml_tensor * logits,
-        struct ggml_tensor * labels) {
+        struct ggml_tensor * logits) {
     return {
         /*backend    =*/ backend,
         /*inputs     =*/ inputs,
         /*logits     =*/ logits,
-        /*labels     =*/ labels,
         /*forward_only =*/ false,
         /*opt_period =*/ 1,
         /*adamw      =*/ {
@@ -93,7 +92,7 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
         result->gb_grad = nullptr;
         result->gb_opt  = nullptr;
 
-        ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
+        result->buf = ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
 
         return result;
     }
@@ -115,7 +114,7 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
         }
     }
 
-    ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
+    result->buf = ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
 
     ggml_graph_reset(result->gb_opt); // Set gradients to zero, reset optimizer.
 
@@ -123,6 +122,7 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
 }
 
 void ggml_opt_new_free(struct ggml_opt_new_context * opt_ctx) {
+    ggml_backend_buffer_free(opt_ctx->buf);
     ggml_free(opt_ctx->ctx);
     delete opt_ctx;
 }

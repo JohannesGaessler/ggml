@@ -525,7 +525,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
 
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
-    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits, model.labels);
+    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits);
     params.opt_period = model.nbatch_logical / model.nbatch_physical;
     ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
 

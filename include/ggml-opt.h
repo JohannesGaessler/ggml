@@ -11,7 +11,6 @@ extern "C" {
         ggml_backend_t backend;
         struct ggml_tensor * inputs;
         struct ggml_tensor * logits;
-        struct ggml_tensor * labels;
 
         bool forward_only;
         int32_t opt_period;
@@ -31,8 +30,7 @@ extern "C" {
     GGML_API ggml_opt_new_params ggml_opt_new_default_params(
             ggml_backend_t       backend,
             struct ggml_tensor * inputs,
-            struct ggml_tensor * logits,
-            struct ggml_tensor * labels);
+            struct ggml_tensor * logits);
 
     GGML_API struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params params);
 
