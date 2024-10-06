@@ -461,62 +461,23 @@ void mnist_model_build(mnist_model & model, const int nbatch_logical, const int 
     GGML_ASSERT(model.logits->ne[2] == 1);
     GGML_ASSERT(model.logits->ne[3] == 1);
 
-    model.probs = ggml_soft_max(model.ctx_compute, model.logits);
-    ggml_set_name(model.probs, "probs");
-    ggml_set_output(model.probs);
-    GGML_ASSERT(model.probs->type == GGML_TYPE_F32);
-    GGML_ASSERT(model.probs->ne[0] == MNIST_NCLASSES);
-    GGML_ASSERT(model.probs->ne[1] == model.nbatch_physical);
-    GGML_ASSERT(model.probs->ne[2] == 1);
-    GGML_ASSERT(model.probs->ne[3] == 1);
-
     model.labels = ggml_new_tensor_2d(model.ctx_compute, GGML_TYPE_F32, MNIST_NCLASSES, model.nbatch_physical);
     ggml_set_name(model.labels, "labels");
     ggml_set_input(model.labels);
-
-    model.loss = ggml_cross_entropy_loss(model.ctx_compute, model.logits, model.labels);
-    ggml_set_name(model.loss, "loss");
-    ggml_set_output(model.loss);
-    ggml_set_loss(model.loss);
-    GGML_ASSERT(model.loss->type == GGML_TYPE_F32);
-    GGML_ASSERT(model.loss->ne[0] == 1);
-    GGML_ASSERT(model.loss->ne[1] == 1);
-    GGML_ASSERT(model.loss->ne[2] == 1);
-    GGML_ASSERT(model.loss->ne[3] == 1);
-
-    model.pred = ggml_argmax(model.ctx_compute, model.logits);
-    ggml_set_name(model.pred, "predictions");
-    ggml_set_output(model.pred);
-    GGML_ASSERT(model.pred->type == GGML_TYPE_I32);
-    GGML_ASSERT(model.pred->ne[0] == model.nbatch_physical);
-    GGML_ASSERT(model.pred->ne[1] == 1);
-    GGML_ASSERT(model.pred->ne[2] == 1);
-    GGML_ASSERT(model.pred->ne[3] == 1);
-
-    model.acc_count = ggml_count_equal(model.ctx_compute, model.pred, ggml_argmax(model.ctx_compute, model.labels));
-    ggml_set_name(model.acc_count, "accuracy_count");
-    ggml_set_output(model.acc_count);
-    GGML_ASSERT(model.acc_count->type == GGML_TYPE_I64);
-    GGML_ASSERT(model.acc_count->ne[0] == 1);
-    GGML_ASSERT(model.acc_count->ne[1] == 1);
-    GGML_ASSERT(model.acc_count->ne[2] == 1);
-    GGML_ASSERT(model.acc_count->ne[3] == 1);
 }
 
 mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset) {
     mnist_eval_result result;
 
-    struct ggml_cgraph * gf = ggml_new_graph(model.ctx_compute);
-    // The outputs are diverging branches of the graphs, therefore multiple calls to ggml_build_forward_expand are needed.
-    ggml_build_forward_expand(gf, model.loss);
-    ggml_build_forward_expand(gf, model.pred);
-    ggml_build_forward_expand(gf, model.acc_count);
-
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
-    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, gf);
+    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits, model.labels);
     params.forward_only = true;
     ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
+
+    struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
+    struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
+    struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
 
     {
         const int64_t t_start_us = ggml_time_us();
@@ -525,9 +486,9 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
         std::vector<int32_t> tmp_pred(model.nbatch_physical);
         int64_t              tmp_acc_count;
 
-        GGML_ASSERT(sizeof(tmp_loss)                    == ggml_nbytes(model.loss));
-        GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(model.pred));
-        GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(model.acc_count));
+        GGML_ASSERT(sizeof(tmp_loss)                    == ggml_nbytes(loss));
+        GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(pred));
+        GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(acc_count));
 
         GGML_ASSERT(dataset.nex % model.nbatch_physical == 0);
         const int nbatches = dataset.nex/model.nbatch_physical;
@@ -536,9 +497,9 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
 
             ggml_opt_new_forward(opt_ctx);
 
-            ggml_backend_tensor_get(model.loss,      &tmp_loss,       0, ggml_nbytes(model.loss));
-            ggml_backend_tensor_get(model.pred,      tmp_pred.data(), 0, ggml_nbytes(model.pred));
-            ggml_backend_tensor_get(model.acc_count, &tmp_acc_count,  0, ggml_nbytes(model.acc_count));
+            ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
+            ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
+            ggml_backend_tensor_get(acc_count, &tmp_acc_count,  0, ggml_nbytes(acc_count));
 
             result.loss.push_back(tmp_loss);
             result.pred.insert(result.pred.end(), tmp_pred.begin(), tmp_pred.end());
@@ -565,20 +526,17 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     const int ibatch_split      = ((int)((1.0f - val_split)*nbatches_logical))*opt_period; // train <-> val split index (physical)
     const int ishard_split      = ibatch_split * model.nbatch_physical/dataset.shard_size;
 
-    // gf == graph forward, forward pass only.
-    struct ggml_cgraph * gf = ggml_new_graph_custom(model.ctx_compute, GGML_DEFAULT_GRAPH_SIZE, /*grads =*/ true); // Forward pass.
-    // The outputs are diverging branches of the graphs, therefore multiple calls to ggml_build_forward_expand are needed.
-    ggml_build_forward_expand(gf, model.loss);
-    ggml_build_forward_expand(gf, model.pred);
-    ggml_build_forward_expand(gf, model.acc_count);
-
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
-    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, gf);
+    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits, model.labels);
     params.opt_period = model.nbatch_logical / model.nbatch_physical;
     ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
 
     dataset.shuffle(-1); // Shuffle all data (train + validation).
+
+    struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
+    struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
+    struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
 
     for (int epoch = 0; epoch < nepoch; ++epoch) {
         fprintf(stderr, "%s: epoch %02d start...", __func__, epoch);
@@ -592,9 +550,9 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
         std::vector<int32_t> tmp_pred(model.nbatch_physical);
         int64_t              tmp_acc_count;
 
-        GGML_ASSERT(sizeof(tmp_loss)                    == ggml_nbytes(model.loss));
-        GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(model.pred));
-        GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(model.acc_count));
+        GGML_ASSERT(sizeof(tmp_loss)                    == ggml_nbytes(loss));
+        GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(pred));
+        GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(acc_count));
 
         mnist_eval_result result_train;
         for (; ibatch_physical < ibatch_split; ++ibatch_physical) {
@@ -602,9 +560,9 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
 
             ggml_opt_new_forward_backward(opt_ctx);
 
-            ggml_backend_tensor_get(model.loss,      &tmp_loss,       0, ggml_nbytes(model.loss));
-            ggml_backend_tensor_get(model.pred,      tmp_pred.data(), 0, ggml_nbytes(model.pred));
-            ggml_backend_tensor_get(model.acc_count, &tmp_acc_count,  0, ggml_nbytes(model.acc_count));
+            ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
+            ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
+            ggml_backend_tensor_get(acc_count, &tmp_acc_count,  0, ggml_nbytes(acc_count));
 
             result_train.loss.push_back(tmp_loss);
             result_train.pred.insert(result_train.pred.end(), tmp_pred.begin(), tmp_pred.end());
@@ -618,9 +576,9 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
 
             ggml_opt_new_forward(opt_ctx);
 
-            ggml_backend_tensor_get(model.loss,      &tmp_loss,       0, ggml_nbytes(model.loss));
-            ggml_backend_tensor_get(model.pred,      tmp_pred.data(), 0, ggml_nbytes(model.pred));
-            ggml_backend_tensor_get(model.acc_count, &tmp_acc_count,  0, ggml_nbytes(model.acc_count));
+            ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
+            ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
+            ggml_backend_tensor_get(acc_count, &tmp_acc_count,  0, ggml_nbytes(acc_count));
 
             result_val.loss.push_back(tmp_loss);
             result_val.pred.insert(result_val.pred.end(), tmp_pred.begin(), tmp_pred.end());
@@ -650,13 +608,14 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     const double t_total_s = 1e-6*t_total_us;
     fprintf(stderr, "%s: training took %.2lfs\n", __func__, t_total_s);
 
-    if (ggml_backend_is_cpu(model.backend)) {
-        std::string fname = model.arch + "-f32.ggml";
-        fprintf(stderr, "%s: saving the GGML graph for the forward pass to %s\n", __func__, fname.c_str());
-        ggml_graph_export(gf, fname.c_str());
-    } else {
-        fprintf(stderr, "%s: not saving the GGML graph for the forward pass because this is only supported for the CPU backend\n", __func__);
-    }
+    // FIXME
+    // if (ggml_backend_is_cpu(model.backend)) {
+    //     std::string fname = model.arch + "-f32.ggml";
+    //     fprintf(stderr, "%s: saving the GGML graph for the forward pass to %s\n", __func__, fname.c_str());
+    //     ggml_graph_export(gf, fname.c_str());
+    // } else {
+    //     fprintf(stderr, "%s: not saving the GGML graph for the forward pass because this is only supported for the CPU backend\n", __func__);
+    // }
 
     ggml_opt_new_free(opt_ctx);
 }

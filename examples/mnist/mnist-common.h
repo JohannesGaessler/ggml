@@ -91,13 +91,9 @@ struct mnist_model {
     int nbatch_logical;
     int nbatch_physical;
 
-    struct ggml_tensor  * images    = nullptr;
-    struct ggml_tensor  * labels    = nullptr;
-    struct ggml_tensor  * logits    = nullptr;
-    struct ggml_tensor  * probs     = nullptr;
-    struct ggml_tensor  * loss      = nullptr;
-    struct ggml_tensor  * pred      = nullptr;
-    struct ggml_tensor  * acc_count = nullptr;
+    struct ggml_tensor * images     = nullptr;
+    struct ggml_tensor * labels     = nullptr;
+    struct ggml_tensor * logits     = nullptr;
 
     struct ggml_tensor * fc1_weight = nullptr;
     struct ggml_tensor * fc1_bias   = nullptr;
