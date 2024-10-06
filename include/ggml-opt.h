@@ -40,6 +40,7 @@ extern "C" {
 
     GGML_API struct ggml_tensor * ggml_opt_new_inputs(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_logits(struct ggml_opt_new_context * opt_ctx);
+    GGML_API struct ggml_tensor * ggml_opt_new_labels(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_loss(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_pred(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_acc_count(struct ggml_opt_new_context * opt_ctx);

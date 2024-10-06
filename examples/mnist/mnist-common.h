@@ -92,7 +92,6 @@ struct mnist_model {
     int nbatch_physical;
 
     struct ggml_tensor * images     = nullptr;
-    struct ggml_tensor * labels     = nullptr;
     struct ggml_tensor * logits     = nullptr;
 
     struct ggml_tensor * fc1_weight = nullptr;

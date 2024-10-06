@@ -460,10 +460,6 @@ void mnist_model_build(mnist_model & model, const int nbatch_logical, const int 
     GGML_ASSERT(model.logits->ne[1] == model.nbatch_physical);
     GGML_ASSERT(model.logits->ne[2] == 1);
     GGML_ASSERT(model.logits->ne[3] == 1);
-
-    model.labels = ggml_new_tensor_2d(model.ctx_compute, GGML_TYPE_F32, MNIST_NCLASSES, model.nbatch_physical);
-    ggml_set_name(model.labels, "labels");
-    ggml_set_input(model.labels);
 }
 
 mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset) {
@@ -471,10 +467,11 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
 
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
-    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits, model.labels);
+    ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits);
     params.forward_only = true;
     ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
 
+    struct ggml_tensor * labels    = ggml_opt_new_labels(opt_ctx);
     struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
     struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
     struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
@@ -493,7 +490,7 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
         GGML_ASSERT(dataset.nex % model.nbatch_physical == 0);
         const int nbatches = dataset.nex/model.nbatch_physical;
         for (int ibatch = 0; ibatch < nbatches; ++ibatch) {
-            dataset.get_batch(model.images, model.labels, ibatch);
+            dataset.get_batch(model.images, labels, ibatch);
 
             ggml_opt_new_forward(opt_ctx);
 
@@ -534,6 +531,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
 
     dataset.shuffle(-1); // Shuffle all data (train + validation).
 
+    struct ggml_tensor * labels    = ggml_opt_new_labels(opt_ctx);
     struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
     struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
     struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
@@ -556,7 +554,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
 
         mnist_eval_result result_train;
         for (; ibatch_physical < ibatch_split; ++ibatch_physical) {
-            dataset.get_batch(model.images, model.labels, ibatch_physical);
+            dataset.get_batch(model.images, labels, ibatch_physical);
 
             ggml_opt_new_forward_backward(opt_ctx);
 
@@ -572,7 +570,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
 
         mnist_eval_result result_val;
         for (; ibatch_physical < nbatches_physical; ++ibatch_physical) {
-            dataset.get_batch(model.images, model.labels, ibatch_physical);
+            dataset.get_batch(model.images, labels, ibatch_physical);
 
             ggml_opt_new_forward(opt_ctx);
 

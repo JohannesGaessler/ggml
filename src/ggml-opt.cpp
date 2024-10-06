@@ -52,7 +52,6 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     result->backend    = params.backend;
     result->inputs     = params.inputs;
     result->logits     = params.logits;
-    result->labels     = params.labels;
     result->opt_period = params.opt_period;
     result->opt_i      = 0;
 
@@ -70,10 +69,12 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     result->gf = ggml_new_graph_custom(result->ctx, GGML_DEFAULT_GRAPH_SIZE, /*grads =*/ true); // Forward pass.
 
     ggml_set_input(result->inputs);
-    ggml_set_input(result->labels);
 
     ggml_set_output(result->logits);
     ggml_build_forward_expand(result->gf, result->logits);
+
+    result->labels = ggml_dup_tensor(result->ctx, result->logits);
+    ggml_set_input(result->labels);
 
     result->loss = ggml_cross_entropy_loss(result->ctx, result->logits, result->labels);
     ggml_set_output(result->loss);
@@ -132,6 +133,10 @@ struct ggml_tensor * ggml_opt_new_inputs(struct ggml_opt_new_context * opt_ctx) 
 
 struct ggml_tensor * ggml_opt_new_logits(struct ggml_opt_new_context * opt_ctx) {
     return opt_ctx->logits;
+}
+
+struct ggml_tensor * ggml_opt_new_labels(struct ggml_opt_new_context * opt_ctx) {
+    return opt_ctx->labels;
 }
 
 struct ggml_tensor * ggml_opt_new_loss(struct ggml_opt_new_context * opt_ctx) {
