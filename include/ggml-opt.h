@@ -9,6 +9,8 @@ extern "C" {
 
     struct ggml_opt_new_params {
         ggml_backend_t backend;
+        ggml_context * ctx;
+
         struct ggml_tensor * inputs;
         struct ggml_tensor * logits;
 
@@ -35,6 +37,8 @@ extern "C" {
     GGML_API struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params params);
 
     GGML_API void ggml_opt_new_free(struct ggml_opt_new_context * opt_ctx);
+
+    GGML_API void ggml_opt_new_reset(struct ggml_opt_new_context * opt_ctx, bool optimizer);
 
     GGML_API struct ggml_tensor * ggml_opt_new_inputs(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_logits(struct ggml_opt_new_context * opt_ctx);

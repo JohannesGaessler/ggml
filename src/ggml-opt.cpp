@@ -9,6 +9,7 @@ struct ggml_opt_new_context {
     ggml_backend_t backend;
     ggml_backend_buffer_t buf;
     struct ggml_context * ctx;
+    bool ctx_owned;
 
     struct ggml_tensor * inputs;
     struct ggml_tensor * logits;
@@ -32,6 +33,7 @@ struct ggml_opt_new_params ggml_opt_new_default_params(
         struct ggml_tensor * logits) {
     return {
         /*backend    =*/ backend,
+        /*ctx        =*/ nullptr,
         /*inputs     =*/ inputs,
         /*logits     =*/ logits,
         /*forward_only =*/ false,
@@ -54,7 +56,10 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     result->opt_period = params.opt_period;
     result->opt_i      = 0;
 
-    {
+    if (params.ctx) {
+        result->ctx = params.ctx;
+        result->ctx_owned = false;
+    } else {
         // The compute context needs a total of 3 compute graphs: forward pass + backwards pass (with/without optimizer step).
         const size_t size_meta = GGML_DEFAULT_GRAPH_SIZE*ggml_tensor_overhead() + 3*ggml_graph_overhead();
         struct ggml_init_params ctx_params = {
@@ -63,6 +68,7 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
             /*.no_alloc   =*/ true,
         };
         result->ctx = ggml_init(ctx_params);
+        result->ctx_owned = true;
     }
 
     result->gf = ggml_new_graph_custom(result->ctx, GGML_DEFAULT_GRAPH_SIZE, /*grads =*/ true); // Forward pass.
@@ -114,17 +120,30 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
         }
     }
 
-    result->buf = ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
-
-    ggml_graph_reset(result->gb_opt); // Set gradients to zero, reset optimizer.
+    if (result->ctx_owned) {
+        result->buf = ggml_backend_alloc_ctx_tensors(result->ctx, result->backend);
+        ggml_opt_new_reset(result, /*optimizer =*/ true);
+    } else {
+        result->buf = nullptr;
+    }
 
     return result;
 }
 
 void ggml_opt_new_free(struct ggml_opt_new_context * opt_ctx) {
-    ggml_backend_buffer_free(opt_ctx->buf);
-    ggml_free(opt_ctx->ctx);
+    if (opt_ctx->ctx_owned) {
+        ggml_backend_buffer_free(opt_ctx->buf);
+        ggml_free(opt_ctx->ctx);
+    }
     delete opt_ctx;
+}
+
+void ggml_opt_new_reset(struct ggml_opt_new_context * opt_ctx, bool optimizer) {
+    if (optimizer) {
+        ggml_graph_reset(opt_ctx->gb_opt);
+    } else {
+        ggml_graph_reset(opt_ctx->gb_grad);
+    }
 }
 
 struct ggml_tensor * ggml_opt_new_inputs(struct ggml_opt_new_context * opt_ctx) {
@@ -166,7 +185,7 @@ void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx) {
     const int32_t opt_i_next = (opt_ctx->opt_i + 1) % opt_ctx->opt_period;
     if (opt_i_next == 0) {
         ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gb_opt);
-        ggml_graph_reset(opt_ctx->gb_grad);
+        ggml_opt_new_reset(opt_ctx, /*optimizer =*/ false);
     } else {
         ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gb_grad);
     }

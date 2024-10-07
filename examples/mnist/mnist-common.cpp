@@ -465,11 +465,11 @@ void mnist_model_build(mnist_model & model, const int nbatch_logical, const int 
 mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset) {
     mnist_eval_result result;
 
-    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
-
     ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits);
     params.forward_only = true;
     ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
+
+    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
     struct ggml_tensor * labels    = ggml_opt_new_labels(opt_ctx);
     struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
@@ -510,6 +510,8 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
                 __func__, (int)dataset.nex, t_total_ms, (double) t_total_us/dataset.nex);
     }
 
+    ggml_opt_new_free(opt_ctx);
+
     result.success = true;
     return result;
 }
@@ -523,11 +525,13 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     const int ibatch_split      = ((int)((1.0f - val_split)*nbatches_logical))*opt_period; // train <-> val split index (physical)
     const int ishard_split      = ibatch_split * model.nbatch_physical/dataset.shard_size;
 
-    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
-
     ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits);
+    params.ctx = model.ctx_compute;
     params.opt_period = model.nbatch_logical / model.nbatch_physical;
     ggml_opt_new_context * opt_ctx = ggml_opt_new_init(params);
+
+    model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
+    ggml_opt_new_reset(opt_ctx, /*optimizer =*/ true);
 
     dataset.shuffle(-1); // Shuffle all data (train + validation).
 
