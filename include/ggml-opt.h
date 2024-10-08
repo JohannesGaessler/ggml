@@ -29,6 +29,8 @@ extern "C" {
 
     struct ggml_opt_new_context;
 
+    struct ggml_opt_new_result;
+
     GGML_API ggml_opt_new_params ggml_opt_new_default_params(
             ggml_backend_t       backend,
             struct ggml_tensor * inputs,
@@ -47,9 +49,14 @@ extern "C" {
     GGML_API struct ggml_tensor * ggml_opt_new_pred(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_acc_count(struct ggml_opt_new_context * opt_ctx);
 
-    GGML_API void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx);
+    GGML_API void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_result * result);
 
-    GGML_API void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx);
+    GGML_API void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_result * result);
+
+    GGML_API void ggml_opt_new_result_nex(     struct ggml_opt_new_result * result, int64_t * nex);
+    GGML_API void ggml_opt_new_result_loss(    struct ggml_opt_new_result * result, double  * loss,     double * unc);
+    GGML_API void ggml_opt_new_result_pred(    struct ggml_opt_new_result * result, int32_t * pred);
+    GGML_API void ggml_opt_new_result_accuracy(struct ggml_opt_new_result * result, double  * accuracy, double * unc);
 
 #ifdef  __cplusplus
 }

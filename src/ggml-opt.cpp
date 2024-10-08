@@ -5,6 +5,10 @@
 #include "ggml-backend.h"
 #include "ggml-impl.h"
 
+#include <cmath>
+#include <cstdint>
+#include <vector>
+
 struct ggml_opt_new_context {
     ggml_backend_t backend;
     ggml_backend_buffer_t buf;
@@ -25,6 +29,13 @@ struct ggml_opt_new_context {
 
     int32_t opt_period;
     int32_t opt_i;
+};
+
+struct ggml_opt_new_result {
+    int64_t nex;
+    std::vector<float>   loss;
+    std::vector<int32_t> pred;
+    int64_t ncorrect;
 };
 
 struct ggml_opt_new_params ggml_opt_new_default_params(
@@ -170,24 +181,92 @@ struct ggml_tensor * ggml_opt_new_acc_count(struct ggml_opt_new_context * opt_ct
     return opt_ctx->acc_count;
 }
 
-void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx) {
-    ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gf);
+static void ggml_opt_new_eval_graph(struct ggml_opt_new_context * opt_ctx, ggml_cgraph * graph, ggml_opt_new_result * result) {
+    GGML_ASSERT(graph);
+    ggml_backend_graph_compute(opt_ctx->backend, graph);
+
+    if (!result) {
+        return;
+    }
+
+    const int64_t nex = opt_ctx->logits->ne[1];
+    GGML_ASSERT(result->nex == nex*int64_t(result->loss.size()) && "varying batch size not supported");
+    result->nex += nex;
+
+    GGML_ASSERT(ggml_is_scalar(opt_ctx->loss));
+    GGML_ASSERT(opt_ctx->loss->type == GGML_TYPE_F32);
+    float loss;
+    ggml_backend_tensor_get(opt_ctx->loss, &loss, 0, ggml_nbytes(opt_ctx->loss));
+    result->loss.push_back(loss);
+
+    GGML_ASSERT(opt_ctx->pred->type == GGML_TYPE_I32);
+    std::vector<int32_t> pred(nex);
+    ggml_backend_tensor_get(opt_ctx->pred, pred.data(), 0, ggml_nbytes(opt_ctx->pred));
+    result->pred.insert(result->pred.end(), pred.begin(), pred.end());
+
+    GGML_ASSERT(ggml_is_scalar(opt_ctx->acc_count));
+    GGML_ASSERT(opt_ctx->acc_count->type == GGML_TYPE_I64);
+    int64_t ncorrect;
+    ggml_backend_tensor_get(opt_ctx->acc_count, &ncorrect, 0, ggml_nbytes(opt_ctx->acc_count));
+    result->ncorrect += ncorrect;
 }
 
-void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx) {
-    GGML_ASSERT(opt_ctx->gb_grad);
-    GGML_ASSERT(opt_ctx->gb_opt);
+void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx, ggml_opt_new_result * result) {
+    ggml_opt_new_eval_graph(opt_ctx, opt_ctx->gf, result);
+}
+
+void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx, ggml_opt_new_result * result) {
     if (opt_ctx->opt_period == 1) {
-        ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gb_opt);
+        ggml_opt_new_eval_graph(opt_ctx, opt_ctx->gf, result);
         return;
     }
 
     const int32_t opt_i_next = (opt_ctx->opt_i + 1) % opt_ctx->opt_period;
     if (opt_i_next == 0) {
-        ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gb_opt);
+        ggml_opt_new_eval_graph(opt_ctx, opt_ctx->gb_opt, result);
         ggml_opt_new_reset(opt_ctx, /*optimizer =*/ false);
     } else {
-        ggml_backend_graph_compute(opt_ctx->backend, opt_ctx->gb_grad);
+        ggml_opt_new_eval_graph(opt_ctx, opt_ctx->gb_grad, result);
     }
     opt_ctx->opt_i = opt_i_next;
+}
+
+void ggml_opt_new_result_nex(struct ggml_opt_new_result * result, int64_t * nex) {
+    *nex = result->nex;
+}
+
+void ggml_opt_new_result_loss(struct ggml_opt_new_result * result, double * loss, double * unc) {
+    const int64_t nbatches = result->loss.size();
+
+    double sum         = 0.0;
+    double sum_squared = 0.0;
+
+    for (const float & loss : result->loss) {
+        sum         += loss;
+        sum_squared += loss*loss;
+    }
+
+    *loss = sum/nbatches;
+
+    if (!unc) {
+        return;
+    }
+
+    *unc = nbatches >= 2 ? sqrt((sum_squared/nbatches - (*loss)*(*loss)) / (nbatches - 1)) : NAN;
+}
+
+void ggml_opt_new_result_pred(struct ggml_opt_new_result * result, float * pred) {
+    for (size_t i = 0; i < result->pred.size(); ++i) {
+        pred[i] = result->pred[i];
+    }
+}
+
+void ggml_opt_new_result_accuracy(struct ggml_opt_new_result * result, double * accuracy, double * unc) {
+    *accuracy = double(result->ncorrect) / double(result->nex);
+
+    if (!unc) {
+        return;
+    }
+
+    *unc = sqrt((*accuracy) * (1.0 - (*accuracy)) / double(result->nex - 1));
 }

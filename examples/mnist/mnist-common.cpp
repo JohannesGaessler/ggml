@@ -492,7 +492,7 @@ mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset)
         for (int ibatch = 0; ibatch < nbatches; ++ibatch) {
             dataset.get_batch(model.images, labels, ibatch);
 
-            ggml_opt_new_forward(opt_ctx);
+            ggml_opt_new_forward(opt_ctx, nullptr);
 
             ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
             ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
@@ -560,7 +560,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
         for (; ibatch_physical < ibatch_split; ++ibatch_physical) {
             dataset.get_batch(model.images, labels, ibatch_physical);
 
-            ggml_opt_new_forward_backward(opt_ctx);
+            ggml_opt_new_forward_backward(opt_ctx, nullptr);
 
             ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
             ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
@@ -576,7 +576,7 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
         for (; ibatch_physical < nbatches_physical; ++ibatch_physical) {
             dataset.get_batch(model.images, labels, ibatch_physical);
 
-            ggml_opt_new_forward(opt_ctx);
+            ggml_opt_new_forward(opt_ctx, nullptr);
 
             ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
             ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
