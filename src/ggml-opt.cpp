@@ -32,10 +32,10 @@ struct ggml_opt_new_context {
 };
 
 struct ggml_opt_new_result {
-    int64_t nex;
+    int64_t              nex      = 0;
     std::vector<float>   loss;
     std::vector<int32_t> pred;
-    int64_t ncorrect;
+    int64_t              ncorrect = 0;
 };
 
 struct ggml_opt_new_params ggml_opt_new_default_params(
@@ -155,6 +155,21 @@ void ggml_opt_new_reset(struct ggml_opt_new_context * opt_ctx, bool optimizer) {
     } else {
         ggml_graph_reset(opt_ctx->gb_grad);
     }
+}
+
+struct ggml_opt_new_result * ggml_opt_new_result_init() {
+    return new ggml_opt_new_result;
+}
+
+void ggml_opt_new_result_free(struct ggml_opt_new_result * result) {
+    delete result;
+}
+
+void ggml_opt_new_result_reset(struct ggml_opt_new_result * result) {
+    result->nex = 0;
+    result->loss.clear();
+    result->pred.clear();
+    result->ncorrect = 0;
 }
 
 struct ggml_tensor * ggml_opt_new_inputs(struct ggml_opt_new_context * opt_ctx) {

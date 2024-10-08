@@ -540,11 +540,17 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
     struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
 
+    struct ggml_opt_new_result * result_train = ggml_opt_new_result_init();
+    struct ggml_opt_new_result * result_val   = ggml_opt_new_result_init();
+
     for (int epoch = 0; epoch < nepoch; ++epoch) {
         fprintf(stderr, "%s: epoch %02d start...", __func__, epoch);
         const int64_t t_start_us = ggml_time_us();
 
         dataset.shuffle(ishard_split); // Shuffle only the training data, keeping training and validation set separate.
+
+        ggml_opt_new_result_reset(result_train);
+        ggml_opt_new_result_reset(result_val);
 
         int ibatch_physical = 0;
 
@@ -556,52 +562,38 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
         GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(pred));
         GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(acc_count));
 
-        mnist_eval_result result_train;
         for (; ibatch_physical < ibatch_split; ++ibatch_physical) {
             dataset.get_batch(model.images, labels, ibatch_physical);
 
-            ggml_opt_new_forward_backward(opt_ctx, nullptr);
-
-            ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
-            ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
-            ggml_backend_tensor_get(acc_count, &tmp_acc_count,  0, ggml_nbytes(acc_count));
-
-            result_train.loss.push_back(tmp_loss);
-            result_train.pred.insert(result_train.pred.end(), tmp_pred.begin(), tmp_pred.end());
-            result_train.ncorrect += tmp_acc_count;
-            result_train.ntotal   += model.nbatch_physical;
+            ggml_opt_new_forward_backward(opt_ctx, result_train);
         }
 
-        mnist_eval_result result_val;
         for (; ibatch_physical < nbatches_physical; ++ibatch_physical) {
             dataset.get_batch(model.images, labels, ibatch_physical);
 
-            ggml_opt_new_forward(opt_ctx, nullptr);
-
-            ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
-            ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
-            ggml_backend_tensor_get(acc_count, &tmp_acc_count,  0, ggml_nbytes(acc_count));
-
-            result_val.loss.push_back(tmp_loss);
-            result_val.pred.insert(result_val.pred.end(), tmp_pred.begin(), tmp_pred.end());
-            result_val.ncorrect += tmp_acc_count;
-            result_val.ntotal   += model.nbatch_physical;
+            ggml_opt_new_forward(opt_ctx, result_val);
         }
 
         {
-            const double loss_mean = mnist_loss(result_train).first;
-            const double percent_correct = 100.0 * mnist_accuracy(result_train).first;
+            double loss;
+            double accuracy;
+            ggml_opt_new_result_loss(    result_train, &loss,     /*unc =*/ nullptr);
+            ggml_opt_new_result_accuracy(result_train, &accuracy, /*unc =*/ nullptr);
 
             const int64_t t_epoch_us = ggml_time_us() - t_start_us;
             const double t_epoch_s = 1e-6*t_epoch_us;
-            fprintf(stderr, "done, took %.2lfs, train_loss=%.6lf, train_acc=%.2f%%", t_epoch_s, loss_mean, percent_correct);
+            fprintf(stderr, "done, took %.2lfs, train_loss=%.6lf, train_acc=%.2f%%", t_epoch_s, loss, 100.0*accuracy);
         }
 
         if (ibatch_split < nbatches_physical) {
-            const std::pair<double, double> loss = mnist_loss(result_val);
-            const std::pair<double, double> acc  = mnist_accuracy(result_val);
+            double loss;
+            double loss_unc;
+            double accuracy;
+            double accuracy_unc;
+            ggml_opt_new_result_loss(    result_val, &loss,     &loss_unc);
+            ggml_opt_new_result_accuracy(result_val, &accuracy, &accuracy_unc);
 
-            fprintf(stderr, ", val_loss=%.6lf+-%.6lf, val_acc=%.2f+-%.2f%%", loss.first, loss.second, 100.0*acc.first, 100.0*acc.second);
+            fprintf(stderr, ", val_loss=%.6lf+-%.6lf, val_acc=%.2f+-%.2f%%", loss, loss_unc, 100.0*accuracy, 100.0*accuracy_unc);
         }
         fprintf(stderr, "\n");
     }
@@ -620,6 +612,8 @@ void mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int n
     // }
 
     ggml_opt_new_free(opt_ctx);
+    ggml_opt_new_result_free(result_train);
+    ggml_opt_new_result_free(result_val);
 }
 
 void mnist_model_save(mnist_model & model, const std::string & fname) {
