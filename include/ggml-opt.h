@@ -44,7 +44,7 @@ extern "C" {
     GGML_API void ggml_opt_new_dataset_free(struct ggml_opt_new_dataset * dataset);
     GGML_API struct ggml_tensor * ggml_opt_new_dataset_data(struct ggml_opt_new_dataset * dataset);
     GGML_API struct ggml_tensor * ggml_opt_new_dataset_labels(struct ggml_opt_new_dataset * dataset);
-    GGML_API void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, size_t ishard_max);
+    GGML_API void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, int64_t idata);
     GGML_API void ggml_opt_new_dataset_get_batch(struct ggml_opt_new_dataset * dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch);
 
     GGML_API struct ggml_opt_new_result * ggml_opt_new_result_init();

@@ -216,12 +216,17 @@ struct ggml_tensor * ggml_opt_new_dataset_labels(struct ggml_opt_new_dataset * d
     return dataset->labels;
 }
 
-void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, size_t ishard_max) {
-    if (ishard_max < dataset->permutation.size()) {
-        std::shuffle(dataset->permutation.begin(), dataset->permutation.begin() + ishard_max, opt_ctx->rng);
+void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, int64_t idata) {
+    GGML_ASSERT(idata <= dataset->ndata);
+
+    if (idata < 0) {
+        std::shuffle(dataset->permutation.begin(), dataset->permutation.end(), opt_ctx->rng);
         return;
     }
-    std::shuffle(dataset->permutation.begin(), dataset->permutation.end(), opt_ctx->rng);
+
+    GGML_ASSERT(idata % dataset->ndata_shard == 0);
+    const int64_t ishard_max = idata / dataset->ndata_shard;
+    std::shuffle(dataset->permutation.begin(), dataset->permutation.begin() + ishard_max, opt_ctx->rng);
 }
 
 void ggml_opt_new_dataset_get_batch(struct ggml_opt_new_dataset * dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch) {

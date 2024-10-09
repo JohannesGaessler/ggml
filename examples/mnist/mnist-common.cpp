@@ -531,9 +531,8 @@ void mnist_model_train(mnist_model & model, ggml_opt_new_dataset * dataset, cons
     const int64_t opt_period        = model.nbatch_logical / model.nbatch_physical;
     const int64_t nbatches_logical  = nex / model.nbatch_logical;
     const int64_t nbatches_physical = nex / model.nbatch_physical;
-    // const int64_t ibatch_split      = ((int)((1.0f - val_split)*nbatches_logical))*opt_period; // train <-> val split index (physical)
-    // const int64_t ishard_split      = ibatch_split * model.nbatch_physical/dataset.shard_size;
-    const int64_t ibatch_split = nbatches_physical;
+    const int64_t ibatch_split      = int64_t(((1.0f - val_split) * nbatches_logical)) * opt_period; // train <-> val split index (physical)
+    const int64_t iex_split         = ibatch_split * model.nbatch_physical;
 
     ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits);
     params.ctx = model.ctx_compute;
@@ -557,8 +556,7 @@ void mnist_model_train(mnist_model & model, ggml_opt_new_dataset * dataset, cons
         fprintf(stderr, "%s: epoch %02d start...", __func__, epoch);
         const int64_t t_start_us = ggml_time_us();
 
-        // dataset.shuffle(ishard_split); // Shuffle only the training data, keeping training and validation set separate.
-        ggml_opt_new_dataset_shuffle(opt_ctx, dataset, -1);
+        ggml_opt_new_dataset_shuffle(opt_ctx, dataset, iex_split);
 
         ggml_opt_new_result_reset(result_train);
         ggml_opt_new_result_reset(result_val);
