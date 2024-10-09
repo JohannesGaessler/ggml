@@ -365,7 +365,7 @@ void ggml_opt_new_result_loss(struct ggml_opt_new_result * result, double * loss
     *unc = nbatches >= 2 ? sqrt((sum_squared/nbatches - (*loss)*(*loss)) / (nbatches - 1)) : NAN;
 }
 
-void ggml_opt_new_result_pred(struct ggml_opt_new_result * result, float * pred) {
+void ggml_opt_new_result_pred(struct ggml_opt_new_result * result, int32_t * pred) {
     for (size_t i = 0; i < result->pred.size(); ++i) {
         pred[i] = result->pred[i];
     }

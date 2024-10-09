@@ -469,8 +469,8 @@ void mnist_model_build(mnist_model & model, const int nbatch_logical, const int 
     GGML_ASSERT(model.logits->ne[3] == 1);
 }
 
-mnist_eval_result mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * dataset) {
-    mnist_eval_result result;
+ggml_opt_new_result * mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * dataset) {
+    ggml_opt_new_result * result = ggml_opt_new_result_init();
 
     ggml_opt_new_params params = ggml_opt_new_default_params(model.backend, model.images, model.logits);
     params.forward_only = true;
@@ -478,21 +478,10 @@ mnist_eval_result mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * d
 
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
-    struct ggml_tensor * labels    = ggml_opt_new_labels(opt_ctx);
-    struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
-    struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
-    struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
+    struct ggml_tensor * labels = ggml_opt_new_labels(opt_ctx);
 
     {
         const int64_t t_start_us = ggml_time_us();
-
-        float                tmp_loss;
-        std::vector<int32_t> tmp_pred(model.nbatch_physical);
-        int64_t              tmp_acc_count;
-
-        GGML_ASSERT(sizeof(tmp_loss)                    == ggml_nbytes(loss));
-        GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(pred));
-        GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(acc_count));
 
         const int64_t nex = ggml_opt_new_dataset_data(dataset)->ne[1];
         GGML_ASSERT(nex % model.nbatch_physical == 0);
@@ -500,16 +489,7 @@ mnist_eval_result mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * d
         for (int ibatch = 0; ibatch < nbatches; ++ibatch) {
             ggml_opt_new_dataset_get_batch(dataset, model.images, labels, ibatch);
 
-            ggml_opt_new_forward(opt_ctx, nullptr);
-
-            ggml_backend_tensor_get(loss,      &tmp_loss,       0, ggml_nbytes(loss));
-            ggml_backend_tensor_get(pred,      tmp_pred.data(), 0, ggml_nbytes(pred));
-            ggml_backend_tensor_get(acc_count, &tmp_acc_count,  0, ggml_nbytes(acc_count));
-
-            result.loss.push_back(tmp_loss);
-            result.pred.insert(result.pred.end(), tmp_pred.begin(), tmp_pred.end());
-            result.ncorrect += tmp_acc_count;
-            result.ntotal   += model.nbatch_physical;
+            ggml_opt_new_forward(opt_ctx, result);
         }
 
         const int64_t t_total_us = ggml_time_us() - t_start_us;
@@ -520,7 +500,6 @@ mnist_eval_result mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * d
 
     ggml_opt_new_free(opt_ctx);
 
-    result.success = true;
     return result;
 }
 
@@ -703,9 +682,12 @@ int wasm_eval(uint8_t * digitPtr) {
 
     mnist_model model = mnist_model_init_from_file("mnist-f32.gguf", "CPU");
     mnist_model_build(model, 1, 1);
-    mnist_eval_result result = mnist_model_eval(model, dataset);
+    ggml_opt_new_result * result = mnist_model_eval(model, dataset);
 
-    return result.pred[0];
+    int32_t pred;
+    ggml_opt_new_result_pred(result, &pred);
+
+    return pred;
 }
 
 int wasm_random_digit(char * digitPtr) {

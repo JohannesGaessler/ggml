@@ -48,8 +48,8 @@ extern "C" {
     GGML_API void ggml_opt_new_dataset_get_batch(struct ggml_opt_new_dataset * dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch);
 
     GGML_API struct ggml_opt_new_result * ggml_opt_new_result_init();
-    GGML_API void ggml_opt_new_result_free(struct ggml_opt_new_result * opt_ctx);
-    GGML_API void ggml_opt_new_result_reset(struct ggml_opt_new_result * opt_ctx);
+    GGML_API void ggml_opt_new_result_free(struct ggml_opt_new_result * result);
+    GGML_API void ggml_opt_new_result_reset(struct ggml_opt_new_result * result);
 
     GGML_API struct ggml_tensor * ggml_opt_new_inputs(struct ggml_opt_new_context * opt_ctx);
     GGML_API struct ggml_tensor * ggml_opt_new_logits(struct ggml_opt_new_context * opt_ctx);
@@ -64,7 +64,7 @@ extern "C" {
 
     GGML_API void ggml_opt_new_result_nex(     struct ggml_opt_new_result * result, int64_t * nex);
     GGML_API void ggml_opt_new_result_loss(    struct ggml_opt_new_result * result, double  * loss,     double * unc);
-    GGML_API void ggml_opt_new_result_pred(    struct ggml_opt_new_result * result, float   * pred);
+    GGML_API void ggml_opt_new_result_pred(    struct ggml_opt_new_result * result, int32_t * pred);
     GGML_API void ggml_opt_new_result_accuracy(struct ggml_opt_new_result * result, double  * accuracy, double * unc);
 
 #ifdef  __cplusplus
