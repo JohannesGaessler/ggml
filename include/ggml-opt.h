@@ -67,6 +67,13 @@ extern "C" {
     GGML_API void ggml_opt_new_result_pred(    struct ggml_opt_new_result * result, int32_t * pred);
     GGML_API void ggml_opt_new_result_accuracy(struct ggml_opt_new_result * result, double  * accuracy, double * unc);
 
+    GGML_API void ggml_opt_new_epoch(
+            struct ggml_opt_new_context *  opt_ctx,
+            struct ggml_opt_new_dataset *  dataset,
+            struct ggml_opt_new_result  ** result_train,
+            struct ggml_opt_new_result  ** result_eval,
+            int64_t                        idata_split);
+
 #ifdef  __cplusplus
 }
 #endif

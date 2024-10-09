@@ -380,3 +380,40 @@ void ggml_opt_new_result_accuracy(struct ggml_opt_new_result * result, double * 
 
     *unc = sqrt((*accuracy) * (1.0 - (*accuracy)) / double(result->nex - 1));
 }
+
+void ggml_opt_new_epoch(
+        struct ggml_opt_new_context *  opt_ctx,
+        struct ggml_opt_new_dataset *  dataset,
+        struct ggml_opt_new_result  ** result_train,
+        struct ggml_opt_new_result  ** result_eval,
+        int64_t                        idata_split) {
+    if (result_train && !(*result_train)) {
+        *result_train = ggml_opt_new_result_init();
+    }
+    if (result_eval && !(*result_eval)) {
+        *result_eval = ggml_opt_new_result_init();
+    }
+
+    struct ggml_tensor * inputs = ggml_opt_new_inputs(opt_ctx);
+    struct ggml_tensor * labels = ggml_opt_new_labels(opt_ctx);
+
+    const int64_t ndata       = ggml_opt_new_dataset_data(dataset)->ne[1];
+    const int64_t ndata_batch = inputs->ne[1];
+    GGML_ASSERT(ndata % ndata_batch == 0);
+
+    const int64_t nbatches = ndata/ndata_batch;
+
+    idata_split = idata_split < 0 ? ndata : idata_split;
+    GGML_ASSERT(idata_split % ndata_batch == 0);
+    const int64_t ibatch_split = idata_split / ndata_batch;
+
+    int64_t ibatch = 0;
+    for (; ibatch < ibatch_split; ++ibatch) {
+        ggml_opt_new_dataset_get_batch(dataset, inputs, labels, ibatch);
+        ggml_opt_new_forward_backward(opt_ctx, *result_train);
+    }
+    for (; ibatch < nbatches; ++ibatch) {
+        ggml_opt_new_dataset_get_batch(dataset, inputs, labels, ibatch);
+        ggml_opt_new_forward(opt_ctx, *result_eval);
+    }
+}

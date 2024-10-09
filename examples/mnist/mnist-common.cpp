@@ -478,24 +478,16 @@ ggml_opt_new_result * mnist_model_eval(mnist_model & model, ggml_opt_new_dataset
 
     model.buf_compute = ggml_backend_alloc_ctx_tensors(model.ctx_compute, model.backend);
 
-    struct ggml_tensor * labels = ggml_opt_new_labels(opt_ctx);
-
     {
         const int64_t t_start_us = ggml_time_us();
 
-        const int64_t nex = ggml_opt_new_dataset_data(dataset)->ne[1];
-        GGML_ASSERT(nex % model.nbatch_physical == 0);
-        const int nbatches = nex/model.nbatch_physical;
-        for (int ibatch = 0; ibatch < nbatches; ++ibatch) {
-            ggml_opt_new_dataset_get_batch(dataset, model.images, labels, ibatch);
-
-            ggml_opt_new_forward(opt_ctx, result);
-        }
+        ggml_opt_new_epoch(opt_ctx, dataset, nullptr, &result, 0);
 
         const int64_t t_total_us = ggml_time_us() - t_start_us;
         const double t_total_ms = 1e-3*t_total_us;
+        const int nex = ggml_opt_new_dataset_data(dataset)->ne[1];
         fprintf(stderr, "%s: model evaluation on %d images took %.2lf ms, %.2lf us/image\n",
-                __func__, (int)nex, t_total_ms, (double) t_total_us/nex);
+                __func__, nex, t_total_ms, (double) t_total_us/nex);
     }
 
     ggml_opt_new_free(opt_ctx);
@@ -523,11 +515,6 @@ void mnist_model_train(mnist_model & model, ggml_opt_new_dataset * dataset, cons
 
     ggml_opt_new_dataset_shuffle(opt_ctx, dataset, -1); // Shuffle all data (train + validation).
 
-    struct ggml_tensor * labels    = ggml_opt_new_labels(opt_ctx);
-    struct ggml_tensor * loss      = ggml_opt_new_loss(opt_ctx);
-    struct ggml_tensor * pred      = ggml_opt_new_pred(opt_ctx);
-    struct ggml_tensor * acc_count = ggml_opt_new_acc_count(opt_ctx);
-
     struct ggml_opt_new_result * result_train = ggml_opt_new_result_init();
     struct ggml_opt_new_result * result_val   = ggml_opt_new_result_init();
 
@@ -540,27 +527,7 @@ void mnist_model_train(mnist_model & model, ggml_opt_new_dataset * dataset, cons
         ggml_opt_new_result_reset(result_train);
         ggml_opt_new_result_reset(result_val);
 
-        int ibatch_physical = 0;
-
-        float                tmp_loss;
-        std::vector<int32_t> tmp_pred(model.nbatch_physical);
-        int64_t              tmp_acc_count;
-
-        GGML_ASSERT(sizeof(tmp_loss)                    == ggml_nbytes(loss));
-        GGML_ASSERT(sizeof(tmp_pred[0])*tmp_pred.size() == ggml_nbytes(pred));
-        GGML_ASSERT(sizeof(tmp_acc_count)               == ggml_nbytes(acc_count));
-
-        for (; ibatch_physical < ibatch_split; ++ibatch_physical) {
-            ggml_opt_new_dataset_get_batch(dataset, model.images, labels, ibatch_physical);
-
-            ggml_opt_new_forward_backward(opt_ctx, result_train);
-        }
-
-        for (; ibatch_physical < nbatches_physical; ++ibatch_physical) {
-            ggml_opt_new_dataset_get_batch(dataset, model.images, labels, ibatch_physical);
-
-            ggml_opt_new_forward(opt_ctx, result_val);
-        }
+        ggml_opt_new_epoch(opt_ctx, dataset, &result_train, &result_val, iex_split);
 
         {
             double loss;
