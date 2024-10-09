@@ -8,6 +8,7 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml.h"
+#include "ggml-opt.h"
 
 #define MNIST_NTRAIN          60000
 #define MNIST_NTEST           10000
@@ -171,17 +172,17 @@ struct mnist_eval_result {
     int64_t              ntotal   = 0;
 };
 
-bool mnist_image_load(const std::string & fname, mnist_dataset & dataset);
-void mnist_image_print(FILE * f, mnist_dataset & dataset, const int iex);
-bool mnist_label_load(const std::string & fname, mnist_dataset & dataset);
+bool mnist_image_load(const std::string & fname, ggml_opt_new_dataset * dataset);
+void mnist_image_print(FILE * f, ggml_opt_new_dataset * dataset, const int iex);
+bool mnist_label_load(const std::string & fname, ggml_opt_new_dataset * dataset);
 
 mnist_eval_result mnist_graph_eval(const std::string & fname, const float * images, const float * labels, const int nex, const int nthreads);
 
 mnist_model       mnist_model_init_from_file(const std::string & fname, const std::string & backend);
 mnist_model       mnist_model_init_random(const std::string & arch, const std::string & backend);
 void              mnist_model_build(mnist_model & model, const int nbatch_logical, const int nbatch_physical);
-mnist_eval_result mnist_model_eval(mnist_model & model, mnist_dataset & dataset);
-void              mnist_model_train(mnist_model & model, mnist_dataset & dataset, const int nepoch, const float val_split);
+mnist_eval_result mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * dataset);
+void              mnist_model_train(mnist_model & model, ggml_opt_new_dataset * dataset, const int nepoch, const float val_split);
 void              mnist_model_save(mnist_model & model, const std::string & fname);
 
 std::pair<double, double> mnist_loss(const mnist_eval_result & result);

@@ -28,7 +28,7 @@ extern "C" {
     };
 
     struct ggml_opt_new_context;
-
+    struct ggml_opt_new_dataset;
     struct ggml_opt_new_result;
 
     GGML_API ggml_opt_new_params ggml_opt_new_default_params(
@@ -39,6 +39,13 @@ extern "C" {
     GGML_API struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params params);
     GGML_API void ggml_opt_new_free(struct ggml_opt_new_context * opt_ctx);
     GGML_API void ggml_opt_new_reset(struct ggml_opt_new_context * opt_ctx, bool optimizer);
+
+    GGML_API struct ggml_opt_new_dataset * ggml_opt_new_dataset_init(int64_t ne_datapoint, int64_t ne_label, int64_t ndata, int64_t ndata_shard);
+    GGML_API void ggml_opt_new_dataset_free(struct ggml_opt_new_dataset * dataset);
+    GGML_API struct ggml_tensor * ggml_opt_new_dataset_data(struct ggml_opt_new_dataset * dataset);
+    GGML_API struct ggml_tensor * ggml_opt_new_dataset_labels(struct ggml_opt_new_dataset * dataset);
+    GGML_API void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, size_t ishard_max);
+    GGML_API void ggml_opt_new_dataset_get_batch(struct ggml_opt_new_dataset * dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch);
 
     GGML_API struct ggml_opt_new_result * ggml_opt_new_result_init();
     GGML_API void ggml_opt_new_result_free(struct ggml_opt_new_result * opt_ctx);

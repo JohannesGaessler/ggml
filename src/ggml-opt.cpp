@@ -5,8 +5,10 @@
 #include "ggml-backend.h"
 #include "ggml-impl.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <vector>
 
 struct ggml_opt_new_context {
@@ -14,6 +16,7 @@ struct ggml_opt_new_context {
     ggml_backend_buffer_t buf;
     struct ggml_context * ctx;
     bool ctx_owned;
+    std::mt19937 rng;
 
     struct ggml_tensor * inputs;
     struct ggml_tensor * logits;
@@ -29,6 +32,19 @@ struct ggml_opt_new_context {
 
     int32_t opt_period;
     int32_t opt_i;
+};
+
+struct ggml_opt_new_dataset {
+    struct ggml_context * ctx;
+    struct ggml_tensor  * data;
+    struct ggml_tensor  * labels;
+
+    int64_t ndata;
+    int64_t ndata_shard;
+    size_t  nbs_data;
+    size_t  nbs_labels;
+
+    std::vector<int64_t> permutation;
 };
 
 struct ggml_opt_new_result {
@@ -154,6 +170,80 @@ void ggml_opt_new_reset(struct ggml_opt_new_context * opt_ctx, bool optimizer) {
         ggml_graph_reset(opt_ctx->gb_opt);
     } else {
         ggml_graph_reset(opt_ctx->gb_grad);
+    }
+}
+
+struct ggml_opt_new_dataset * ggml_opt_new_dataset_init(int64_t ne_datapoint, int64_t ne_label, int64_t ndata, int64_t ndata_shard) {
+    ggml_opt_new_dataset * result = new ggml_opt_new_dataset;
+    result->ndata       = ndata;
+    result->ndata_shard = ndata_shard;
+
+    {
+        const size_t nbytes_data   = ndata*ne_datapoint*sizeof(float) + ggml_tensor_overhead();
+        const size_t nbytes_labels = ndata*ne_label    *sizeof(float) + ggml_tensor_overhead();
+        struct ggml_init_params params = {
+            /*.mem_size   =*/ nbytes_data + nbytes_labels,
+            /*.mem_buffer =*/ nullptr,
+            /*.no_alloc   =*/ false,
+        };
+        result->ctx = ggml_init(params);
+    }
+
+    result->data   = ggml_new_tensor_2d(result->ctx, GGML_TYPE_F32, ne_datapoint, ndata);
+    result->labels = ggml_new_tensor_2d(result->ctx, GGML_TYPE_F32, ne_label,     ndata);
+
+    result->nbs_data   = ggml_nbytes(result->data)   * ndata_shard/ndata;
+    result->nbs_labels = ggml_nbytes(result->labels) * ndata_shard/ndata;
+
+    const int64_t nshards = ndata/ndata_shard;
+    result->permutation.resize(nshards);
+    for (int64_t i = 0; i < nshards; ++i) {
+        result->permutation[i] = i;
+    }
+    return result;
+}
+
+void ggml_opt_new_dataset_free(struct ggml_opt_new_dataset * dataset) {
+    ggml_free(dataset->ctx);
+    delete dataset;
+}
+
+struct ggml_tensor * ggml_opt_new_dataset_data(struct ggml_opt_new_dataset * dataset) {
+    return dataset->data;
+}
+
+struct ggml_tensor * ggml_opt_new_dataset_labels(struct ggml_opt_new_dataset * dataset) {
+    return dataset->labels;
+}
+
+void ggml_opt_new_dataset_shuffle(struct ggml_opt_new_context * opt_ctx, struct ggml_opt_new_dataset * dataset, size_t ishard_max) {
+    if (ishard_max < dataset->permutation.size()) {
+        std::shuffle(dataset->permutation.begin(), dataset->permutation.begin() + ishard_max, opt_ctx->rng);
+        return;
+    }
+    std::shuffle(dataset->permutation.begin(), dataset->permutation.end(), opt_ctx->rng);
+}
+
+void ggml_opt_new_dataset_get_batch(struct ggml_opt_new_dataset * dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch) {
+    GGML_ASSERT(ggml_is_contiguous(data_batch));
+    GGML_ASSERT(ggml_is_contiguous(labels_batch));
+
+    const size_t nb_data_batch = ggml_nbytes(data_batch);
+    GGML_ASSERT(nb_data_batch % dataset->nbs_data == 0);
+    const int64_t shards_per_batch = nb_data_batch / dataset->nbs_data;
+
+    const size_t nb_labels_batch = ggml_nbytes(labels_batch);
+    GGML_ASSERT(nb_labels_batch == shards_per_batch*dataset->nbs_labels);
+
+    GGML_ASSERT((ibatch + 1)*shards_per_batch <= int64_t(dataset->permutation.size()));
+
+    for (int64_t ishard_batch = 0; ishard_batch < shards_per_batch; ++ishard_batch) {
+        const int64_t ishard = dataset->permutation[ibatch*shards_per_batch + ishard_batch];
+
+        const char * ptr_data   = (const char *)   dataset->data->data + ishard*dataset->nbs_data;
+        const char * ptr_labels = (const char *) dataset->labels->data + ishard*dataset->nbs_labels;
+        ggml_backend_tensor_set(data_batch,   ptr_data,   ishard_batch*dataset->nbs_data,   dataset->nbs_data);
+        ggml_backend_tensor_set(labels_batch, ptr_labels, ishard_batch*dataset->nbs_labels, dataset->nbs_labels);
     }
 }
 

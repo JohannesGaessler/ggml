@@ -1,4 +1,5 @@
 #include "ggml.h"
+#include "ggml-opt.h"
 
 #include "mnist-common.h"
 
@@ -24,7 +25,7 @@ int main(int argc, char ** argv) {
         exit(1);
     }
 
-    struct mnist_dataset dataset(/*nex =*/ MNIST_NTEST, /*shard_size =*/ MNIST_NBATCH_PHYSICAL);
+    struct ggml_opt_new_dataset * dataset = ggml_opt_new_dataset_init(MNIST_NINPUT, MNIST_NCLASSES, MNIST_NTRAIN, MNIST_NBATCH_PHYSICAL);
 
     if (!mnist_image_load(argv[2], dataset)) {
         return 1;
@@ -43,7 +44,8 @@ int main(int argc, char ** argv) {
     if (backend == "CPU") {
         const int ncores_logical = std::thread::hardware_concurrency();
         result_eval = mnist_graph_eval(
-            argv[1], ggml_get_data_f32(dataset.data), ggml_get_data_f32(dataset.labels), MNIST_NTEST, std::min(ncores_logical, (ncores_logical + 4)/2));
+            argv[1], ggml_get_data_f32(ggml_opt_new_dataset_data(dataset)), ggml_get_data_f32(ggml_opt_new_dataset_data(dataset)),
+            MNIST_NTEST, std::min(ncores_logical, (ncores_logical + 4)/2));
         if (result_eval.success) {
             fprintf(stdout, "%s: predicted digit is %d\n", __func__, result_eval.pred[iex]);
 
