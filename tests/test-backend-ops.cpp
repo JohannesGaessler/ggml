@@ -3846,14 +3846,14 @@ int main(int argc, char ** argv) {
         ggml_backend_free(backend);
     }
 
+    ggml_quantize_free();
+
     printf("%zu/%zu backends passed\n", n_ok, ggml_backend_dev_count());
 
     if (n_ok != ggml_backend_dev_count()) {
         printf("\033[1;31mFAIL\033[0m\n");
         return 1;
     }
-
-    ggml_quantize_free();
 
     printf("\033[1;32mOK\033[0m\n");
     return 0;

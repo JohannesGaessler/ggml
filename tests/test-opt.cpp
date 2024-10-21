@@ -1,181 +1,151 @@
 #include "ggml.h"
+#include "ggml-alloc.h"
+#include "ggml-backend.h"
+#include "ggml-opt.h"
 
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cassert>
+#include <inttypes.h>
+#include <thread>
+#include <vector>
 
-#define MAX_NARGS 2
+static bool test_dataset(ggml_backend_t backend) {
+    bool ok = true;
 
-#if defined(__GNUC__)
-#pragma GCC diagnostic ignored "-Wdouble-promotion"
-#endif
+    constexpr int64_t ne_datapoint = 2;
+    constexpr int64_t ne_label     = 1;
+    constexpr int64_t ndata        = 6;
 
-//
-// logging
-//
-#define GGML_DEBUG 0
-#if (GGML_DEBUG >= 1)
-#define GGML_PRINT_DEBUG(...) printf(__VA_ARGS__)
-#else
-#define GGML_PRINT_DEBUG(...)
-#endif
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ ndata*2*ggml_tensor_overhead(),
+        /*.mem_buffer =*/ nullptr,
+        /*.no_alloc   =*/ true,
+    };
+    struct ggml_context * ctx = ggml_init(params);
 
-#if (GGML_DEBUG >= 5)
-#define GGML_PRINT_DEBUG_5(...) printf(__VA_ARGS__)
-#else
-#define GGML_PRINT_DEBUG_5(...)
-#endif
+    std::vector<struct ggml_tensor *>   data_batch(ndata);
+    std::vector<struct ggml_tensor *> labels_batch(ndata);
+    for (int64_t ndata_batch = 1; ndata_batch <= ndata; ++ndata_batch) {
+        data_batch[ndata_batch-1]   = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ndata_batch*ne_datapoint);
+        labels_batch[ndata_batch-1] = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ndata_batch*ne_label);
+    }
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
 
-#if (GGML_DEBUG >= 10)
-#define GGML_PRINT_DEBUG_10(...) printf(__VA_ARGS__)
-#else
-#define GGML_PRINT_DEBUG_10(...)
-#endif
+    for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
+        struct ggml_opt_new_dataset * dataset = ggml_opt_new_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
 
-#define GGML_PRINT(...) printf(__VA_ARGS__)
+        {
+            float * data   = ggml_get_data_f32(ggml_opt_new_dataset_data(  dataset));
+            float * labels = ggml_get_data_f32(ggml_opt_new_dataset_labels(dataset));
 
-
-static float frand(void) {
-    return (float)rand()/(float)RAND_MAX;
-}
-
-static struct ggml_tensor * get_random_tensor(
-    struct ggml_context * ctx0, int ndims, int64_t ne[], float fmin, float fmax
-) {
-    struct ggml_tensor * result = ggml_new_tensor(ctx0, GGML_TYPE_F32, ndims, ne);
-
-    switch (ndims) {
-        case 1:
-            for (int i0 = 0; i0 < ne[0]; i0++) {
-                ((float *)result->data)[i0] = frand()*(fmax - fmin) + fmin;
-            }
-            break;
-        case 2:
-            for (int i1 = 0; i1 < ne[1]; i1++) {
-                for (int i0 = 0; i0 < ne[0]; i0++) {
-                    ((float *)result->data)[i1*ne[0] + i0] = frand()*(fmax - fmin) + fmin;
+            for (int64_t idata = 0; idata < ndata; ++idata) {
+                for (int64_t id = 0; id < ne_datapoint; ++id) {
+                    data[  idata*ne_datapoint + id] =     16*idata + id;
+                }
+                for (int64_t il = 0; il < ne_label;     ++il) {
+                    labels[idata*ne_label     + il] = 16*(16*idata + il);
                 }
             }
-            break;
-        case 3:
-            for (int i2 = 0; i2 < ne[2]; i2++) {
-                for (int i1 = 0; i1 < ne[1]; i1++) {
-                    for (int i0 = 0; i0 < ne[0]; i0++) {
-                        ((float *)result->data)[i2*ne[1]*ne[0] + i1*ne[0] + i0] = frand()*(fmax - fmin) + fmin;
+        }
+
+        for (int64_t ndata_batch = 1; ndata_batch <= ndata; ++ndata_batch) {
+            if (ndata_batch % ndata_shard != 0) {
+                continue;
+            }
+            bool subtest_ok = true;
+
+            std::vector<float>   data(ggml_nelements(  data_batch[ndata_batch-1]));
+            std::vector<float> labels(ggml_nelements(labels_batch[ndata_batch-1]));
+
+            const int64_t nbatches = ndata / ndata_batch;
+            for (int64_t ibatch = 0; subtest_ok && ibatch < nbatches; ++ibatch) {
+                ggml_opt_new_dataset_get_batch(dataset, data_batch[ndata_batch-1], labels_batch[ndata_batch-1], ibatch);
+
+                ggml_backend_tensor_get(  data_batch[ndata_batch-1],   data.data(), 0, ggml_nbytes(  data_batch[ndata_batch-1]));
+                ggml_backend_tensor_get(labels_batch[ndata_batch-1], labels.data(), 0, ggml_nbytes(labels_batch[ndata_batch-1]));
+
+                for (int64_t idata_batch = 0; subtest_ok && idata_batch < ndata_batch; ++idata_batch) {
+                    const int64_t idata = ibatch*ndata_batch + idata_batch;
+
+                    for (int64_t id = 0; subtest_ok && id < ne_datapoint; ++id) {
+                        if (data[  idata_batch*ne_datapoint + id] != 16*idata + id) {
+                            subtest_ok = false;
+                        }
                     }
-                }
-            }
-            break;
-        case 4:
-            for (int i3 = 0; i3 < ne[3]; i3++) {
-                for (int i2 = 0; i2 < ne[2]; i2++) {
-                    for (int i1 = 0; i1 < ne[1]; i1++) {
-                        for (int i0 = 0; i0 < ne[0]; i0++) {
-                            ((float *)result->data)[i3*ne[2]*ne[1]*ne[0] + i2*ne[1]*ne[0] + i1*ne[0] + i0] = frand()*(fmax - fmin) + fmin;
+                    for (int64_t il = 0; subtest_ok && il < ne_label;     ++il) {
+                        if (labels[idata_batch*ne_label     + il] != 16*(16*idata + il)) {
+                            subtest_ok = false;
                         }
                     }
                 }
             }
-            break;
-        default:
-            assert(false);
+
+            printf("  test_dataset(shuffle=0, ndata_shard=%" PRId64 ", ndata_batch=%" PRId64 "): ", ndata_shard, ndata_batch);
+            if (subtest_ok) {
+                printf("\033[1;32mOK\033[0m\n");
+            } else {
+                printf("\033[1;31mFAIL\033[0m\n");
+                ok = false;
+            }
+        }
+
+        ggml_opt_new_dataset_free(dataset);
     }
 
-    return result;
+    ggml_backend_buffer_free(buf);
+    ggml_free(ctx);
+
+    return ok;
+}
+
+static bool test_backend(ggml_backend_t backend) {
+    bool ok = true;
+
+    ok = ok && test_dataset(backend);
+
+    return ok;
 }
 
 int main(void) {
-    struct ggml_init_params params = {
-        /* .mem_size   = */ 1024*1024*1024,
-        /* .mem_buffer = */ NULL,
-        /* .no_alloc   = */ false,
-    };
+    printf("Testing %zu devices\n\n", ggml_backend_dev_count());
+    size_t n_ok = 0;
 
-    struct ggml_context * ctx = ggml_init(params);
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
 
-    int64_t ne1[4] = {4, 128, 1, 1};
-    int64_t ne2[4] = {4, 256, 1, 1};
-    int64_t ne3[4] = {128, 256, 1, 1};
+        printf("Backend %zu/%zu: %s\n", i + 1, ggml_backend_dev_count(), ggml_backend_dev_name(dev));
 
-    struct ggml_tensor * a = get_random_tensor(ctx, 2, ne1, -1, +1);
-    struct ggml_tensor * b = get_random_tensor(ctx, 2, ne2, -1, +1);
-    ggml_set_param(ctx, a);
-    ggml_set_param(ctx, b);
+        ggml_backend_t backend = ggml_backend_dev_init(dev, NULL);
+        GGML_ASSERT(backend != NULL);
 
-    struct ggml_tensor * c = get_random_tensor(ctx, 2, ne3, -1, +1);
+        if (ggml_backend_is_cpu(backend)) {
+            ggml_backend_cpu_set_n_threads(backend, std::thread::hardware_concurrency() / 2);
+        }
 
-    struct ggml_tensor * ab = ggml_mul_mat(ctx, a, b);
-    struct ggml_tensor * d  = ggml_sub(ctx, c, ab);
-    struct ggml_tensor * e  = ggml_sum(ctx, ggml_sqr(ctx, d));
+        printf("  Device description: %s\n", ggml_backend_dev_description(dev));
+        size_t free, total; // NOLINT
+        ggml_backend_dev_memory(dev, &free, &total);
+        printf("  Device memory: %zu MB (%zu MB free)\n", total / 1024 / 1024, free / 1024 / 1024);
+        printf("\n");
 
-    struct ggml_cgraph * ge = ggml_new_graph_custom(ctx, GGML_DEFAULT_GRAPH_SIZE, true);
-    ggml_build_forward_expand(ge, e);
-    ggml_graph_reset(ge);
+        const bool ok = test_backend(backend);
 
-    ggml_graph_compute_with_ctx(ctx, ge, /*n_threads*/ 1);
+        printf("  Backend %s: ", ggml_backend_name(backend));
+        if (ok) {
+            printf("\033[1;32mOK\033[0m\n");
+            n_ok++;
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+        }
 
-    const float fe = ggml_get_f32_1d(e, 0);
-    printf("%s: e = %.4f\n", __func__, fe);
+        printf("\n");
 
-    struct ggml_opt_params opt_params = ggml_opt_default_params(GGML_OPT_TYPE_ADAM);
+        ggml_backend_free(backend);
+    }
 
-    ggml_opt(ctx, opt_params, e);
-
-    ggml_graph_reset(ge);
-
-    ggml_graph_compute_with_ctx(ctx, ge, /*n_threads*/ 1);
-
-    const float fe_opt = ggml_get_f32_1d(e, 0);
-    printf("%s: original  e = %.4f\n", __func__, fe);
-    printf("%s: optimized e = %.4f\n", __func__, fe_opt);
-
-    const bool success = (fe_opt <= fe);
-    assert(success);
-
-    ggml_free(ctx);
-    return success ? 0 : -1;
+    printf("%zu/%zu backends passed\n", n_ok, ggml_backend_dev_count());
+    if (n_ok != ggml_backend_dev_count()) {
+        printf("\033[1;31mFAIL\033[0m\n");
+        return 1;
+    }
+    printf("\033[1;32mOK\033[0m\n");
+    return 0;
 }
-// int64_t ne1[4] = {4, 128, 1, 1};
-// int64_t ne2[4] = {4, 256, 1, 1};;
-// int64_t ne3[4] = {128, 256, 1, 1};
-// main: original  e = 25890.9375
-// main: optimized e = 10094.7031
-
-// int64_t ne1[4] = {8, 128, 1, 1};
-// int64_t ne2[4] = {8, 256, 1, 1};;
-// int64_t ne3[4] = {128, 256, 1, 1};
-// main: original  e = 39429.5078
-// main: optimized e = 9275.8936
-
-// int64_t ne1[4] = {16, 128, 1, 1};
-// int64_t ne2[4] = {16, 256, 1, 1};;
-// int64_t ne3[4] = {128, 256, 1, 1};
-// main: original  e = 68371.1328
-// main: optimized e = 7854.4502
-
-
-// int64_t ne1[4] = {32, 128, 1, 1};
-// int64_t ne2[4] = {32, 256, 1, 1};;
-// int64_t ne3[4] = {128, 256, 1, 1};
-// main: original  e = 126061.1953
-// main: optimized e = 5451.0166
-
-// int64_t ne1[4] = {4, 1024, 1, 1};
-// int64_t ne2[4] = {4, 2048, 1, 1};;
-// int64_t ne3[4] = {1024, 2048, 1, 1};
-// main: original  e = 1620817.8750
-// main: optimized e = 698387.6875
-
-// another run on M1
-// int64_t ne1[4] = {4, 1024, 1, 1};
-// int64_t ne2[4] = {4, 2048, 1, 1};;
-// int64_t ne3[4] = {1024, 2048, 1, 1};
-// main: original  e = 1629595.6250
-// main: optimized e = 698169.1250
-
-// int64_t ne1[4] = {32, 1024, 1, 1};
-// int64_t ne2[4] = {32, 2048, 1, 1};;
-// int64_t ne3[4] = {1024, 2048, 1, 1};
-// main: original  e = 8146770.5000
-// main: optimized e = 651119.1250
