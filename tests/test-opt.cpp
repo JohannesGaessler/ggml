@@ -4,15 +4,34 @@
 #include "ggml-opt.h"
 
 #include <inttypes.h>
+#include <string>
 #include <thread>
 #include <vector>
 
+constexpr int64_t ne_datapoint = 2;
+constexpr int64_t ne_label     = 1;
+constexpr int64_t ndata        = 6;
+
+static struct ggml_opt_new_dataset * helper_get_dataset(const int64_t ndata_shard) {
+    struct ggml_opt_new_dataset * dataset = ggml_opt_new_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
+
+    float * data   = ggml_get_data_f32(ggml_opt_new_dataset_data(  dataset));
+    float * labels = ggml_get_data_f32(ggml_opt_new_dataset_labels(dataset));
+
+    for (int64_t idata = 0; idata < ndata; ++idata) {
+        for (int64_t id = 0; id < ne_datapoint; ++id) {
+            data[  idata*ne_datapoint + id] =     16*idata + id;
+        }
+        for (int64_t il = 0; il < ne_label;     ++il) {
+            labels[idata*ne_label     + il] = 16*(16*idata + il);
+        }
+    }
+
+    return dataset;
+}
+
 static bool test_dataset(ggml_backend_t backend) {
     bool ok = true;
-
-    constexpr int64_t ne_datapoint = 2;
-    constexpr int64_t ne_label     = 1;
-    constexpr int64_t ndata        = 6;
 
     struct ggml_init_params params = {
         /*.mem_size   =*/ ndata*2*ggml_tensor_overhead(),
@@ -30,21 +49,7 @@ static bool test_dataset(ggml_backend_t backend) {
     ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
 
     for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
-        struct ggml_opt_new_dataset * dataset = ggml_opt_new_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
-
-        {
-            float * data   = ggml_get_data_f32(ggml_opt_new_dataset_data(  dataset));
-            float * labels = ggml_get_data_f32(ggml_opt_new_dataset_labels(dataset));
-
-            for (int64_t idata = 0; idata < ndata; ++idata) {
-                for (int64_t id = 0; id < ne_datapoint; ++id) {
-                    data[  idata*ne_datapoint + id] =     16*idata + id;
-                }
-                for (int64_t il = 0; il < ne_label;     ++il) {
-                    labels[idata*ne_label     + il] = 16*(16*idata + il);
-                }
-            }
-        }
+        struct ggml_opt_new_dataset * dataset = helper_get_dataset(ndata_shard);
 
         for (int64_t ndata_batch = 1; ndata_batch <= ndata; ++ndata_batch) {
             if (ndata_batch % ndata_shard != 0) {
@@ -78,7 +83,7 @@ static bool test_dataset(ggml_backend_t backend) {
                 }
             }
 
-            printf("  test_dataset(shuffle=0, ndata_shard=%" PRId64 ", ndata_batch=%" PRId64 "): ", ndata_shard, ndata_batch);
+            printf("  %s(shuffle=0, ndata_shard=%" PRId64 ", ndata_batch=%" PRId64 "): ", __func__, ndata_shard, ndata_batch);
             if (subtest_ok) {
                 printf("\033[1;32mOK\033[0m\n");
             } else {
@@ -96,10 +101,158 @@ static bool test_dataset(ggml_backend_t backend) {
     return ok;
 }
 
+static bool test_ggml_opt_new(ggml_backend_t backend) {
+    bool ok = true;
+
+    struct ggml_init_params params = {
+        /*.mem_size   =*/ 1*ggml_tensor_overhead(),
+        /*.mem_buffer =*/ nullptr,
+        /*.no_alloc   =*/ true,
+    };
+    struct ggml_context * ctx = ggml_init(params);
+
+    struct ggml_tensor * t = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 6);
+    ggml_set_param(ctx, t);
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
+    {
+        std::vector<float> tmp(6);
+        for (int i = 0; i < 6; ++i) {
+            tmp[i] = i;
+        }
+        ggml_backend_tensor_set(t, tmp.data(), 0, ggml_nbytes(t));
+    }
+
+    struct ggml_opt_new_params opt_params = ggml_opt_new_default_params(backend, t, t);
+    opt_params.loss_op = GGML_OP_SUM;
+    struct ggml_opt_new_context * opt_ctx = ggml_opt_new_init(opt_params);
+
+    {
+        const std::string subtest = "vals_initial";
+        bool subtest_ok = true;
+        std::vector<float> tmp(6);
+        ggml_backend_tensor_get(t, tmp.data(), 0, ggml_nbytes(t));
+        for (int i = 0; subtest_ok && i < 6; ++i) {
+            if (tmp[i] != i) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(subtest=%s): ", __func__, subtest.c_str());
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+            ok = false;
+        }
+    }
+    {
+        const std::string subtest = "grads_initial";
+        bool subtest_ok = true;
+        std::vector<float> tmp(6);
+        ggml_backend_tensor_get(t->grad, tmp.data(), 0, ggml_nbytes(t->grad));
+        for (int i = 0; subtest_ok && i < 6; ++i) {
+            if (tmp[i] != 0.0f) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(subtest=%s): ", __func__, subtest.c_str());
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+            ok = false;
+        }
+    }
+
+    ggml_opt_new_forward(opt_ctx, nullptr);
+
+    {
+        const std::string subtest = "vals_after_forward";
+        bool subtest_ok = true;
+        std::vector<float> tmp(6);
+        ggml_backend_tensor_get(t, tmp.data(), 0, ggml_nbytes(t));
+        for (int i = 0; subtest_ok && i < 6; ++i) {
+            if (tmp[i] != i) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(subtest=%s): ", __func__, subtest.c_str());
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+            ok = false;
+        }
+    }
+    {
+        const std::string subtest = "grads_after_forward";
+        bool subtest_ok = true;
+        std::vector<float> tmp(6);
+        ggml_backend_tensor_get(t->grad, tmp.data(), 0, ggml_nbytes(t->grad));
+        for (int i = 0; subtest_ok && i < 6; ++i) {
+            if (tmp[i] != 0.0f) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(subtest=%s): ", __func__, subtest.c_str());
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+            ok = false;
+        }
+    }
+
+    ggml_opt_new_forward_backward(opt_ctx, nullptr);
+
+    {
+        const std::string subtest = "vals_after_forward_backward";
+        bool subtest_ok = true;
+        std::vector<float> tmp(6);
+        ggml_backend_tensor_get(t, tmp.data(), 0, ggml_nbytes(t));
+        for (int i = 0; subtest_ok && i < 6; ++i) {
+            if (tmp[i] != i) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(subtest=%s): ", __func__, subtest.c_str());
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+            ok = false;
+        }
+    }
+    {
+        const std::string subtest = "grads_after_forward_backward";
+        bool subtest_ok = true;
+        std::vector<float> tmp(6);
+        ggml_backend_tensor_get(t->grad, tmp.data(), 0, ggml_nbytes(t->grad));
+        for (int i = 0; subtest_ok && i < 6; ++i) {
+            if (tmp[i] != 0.0f) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(subtest=%s): ", __func__, subtest.c_str());
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+            ok = false;
+        }
+    }
+
+    ggml_opt_new_free(opt_ctx);
+    ggml_backend_buffer_free(buf);
+    ggml_free(ctx);
+
+    return ok;
+}
+
 static bool test_backend(ggml_backend_t backend) {
     bool ok = true;
 
     ok = ok && test_dataset(backend);
+    ok = ok && test_ggml_opt_new(backend);
 
     return ok;
 }

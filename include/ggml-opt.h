@@ -19,6 +19,7 @@ extern "C" {
 
         struct ggml_tensor * inputs;
         struct ggml_tensor * logits;
+        enum ggml_op loss_op;
 
         bool forward_only;  // if true, don't build the graphs for the backward pass
         int32_t opt_period; // after how many gradient accumulation steps an optimizer step should be done

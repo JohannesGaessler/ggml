@@ -63,6 +63,7 @@ struct ggml_opt_new_params ggml_opt_new_default_params(
         /*ctx        =*/ nullptr,
         /*inputs     =*/ inputs,
         /*logits     =*/ logits,
+        /*loss_op    =*/ GGML_OP_CROSS_ENTROPY_LOSS,
         /*forward_only =*/ false,
         /*opt_period =*/ 1,
         /*adamw      =*/ {
@@ -79,7 +80,7 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     struct ggml_opt_new_context * result = new struct ggml_opt_new_context;
     result->backend    = params.backend;
     result->inputs     = params.inputs;
-    result->outputs     = params.logits;
+    result->outputs    = params.logits;
     result->opt_period = params.opt_period;
     result->opt_i      = 0;
 
@@ -105,10 +106,23 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     ggml_set_output(result->outputs);
     ggml_build_forward_expand(result->gf, result->outputs);
 
-    result->labels = ggml_dup_tensor(result->ctx, result->outputs);
-    ggml_set_input(result->labels);
-
-    result->loss = ggml_cross_entropy_loss(result->ctx, result->outputs, result->labels);
+    switch (params.loss_op) {
+        case GGML_OP_SUM: {
+            result->labels = nullptr;
+            result->loss = ggml_sum(result->ctx, result->outputs);
+            break;
+        }
+        case GGML_OP_CROSS_ENTROPY_LOSS: {
+            result->labels = ggml_dup_tensor(result->ctx, result->outputs);
+            ggml_set_input(result->labels);
+            result->loss = ggml_cross_entropy_loss(result->ctx, result->outputs, result->labels);
+            break;
+        }
+        default: {
+            GGML_ASSERT(false && "unsupported GGML op for loss");
+            break;
+        }
+    }
     ggml_set_output(result->loss);
     ggml_set_loss(result->loss);
     ggml_build_forward_expand(result->gf, result->loss);
@@ -117,9 +131,13 @@ struct ggml_opt_new_context * ggml_opt_new_init(struct ggml_opt_new_params param
     ggml_set_output(result->pred);
     ggml_build_forward_expand(result->gf, result->pred);
 
-    result->ncorrect = ggml_count_equal(result->ctx, result->pred, ggml_argmax(result->ctx, result->labels));
-    ggml_set_output(result->ncorrect);
-    ggml_build_forward_expand(result->gf, result->ncorrect);
+    if (result->labels) {
+        result->ncorrect = ggml_count_equal(result->ctx, result->pred, ggml_argmax(result->ctx, result->labels));
+        ggml_set_output(result->ncorrect);
+        ggml_build_forward_expand(result->gf, result->ncorrect);
+    } else {
+        result->ncorrect = nullptr;
+    }
 
     if (params.forward_only) {
         result->gb_grad = nullptr;
@@ -327,7 +345,7 @@ void ggml_opt_new_forward(struct ggml_opt_new_context * opt_ctx, ggml_opt_new_re
 
 void ggml_opt_new_forward_backward(struct ggml_opt_new_context * opt_ctx, ggml_opt_new_result * result) {
     if (opt_ctx->opt_period == 1) {
-        ggml_opt_new_eval_graph(opt_ctx, opt_ctx->gf, result);
+        ggml_opt_new_eval_graph(opt_ctx, opt_ctx->gb_opt, result);
         return;
     }
 

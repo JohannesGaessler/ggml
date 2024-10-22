@@ -18811,6 +18811,7 @@ void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * 
     GGML_ASSERT(gf->n_nodes > 0);
     GGML_ASSERT(gf->grads);
 
+    bool any_grads = false;
     for (int i = 0; i < gf->n_nodes; ++i) {
         struct ggml_tensor * node = gf->nodes[i];
 
@@ -18863,7 +18864,9 @@ void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * 
 
         // create a new tensor with the same type and shape as the node and set it as grad
         node->grad = ggml_dup_tensor(ctx, node);
+        any_grads = true;
     }
+    GGML_ASSERT(any_grads && "no tensor was given gradients, did you forget to call ggml_set_param?");
 
     // keep tables of original gradients for replacement/accumulation logic
     struct ggml_hash_set zero_table = ggml_hash_set_new(gf->size);
