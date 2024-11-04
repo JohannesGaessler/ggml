@@ -16,21 +16,21 @@ constexpr int64_t ne_label     = 1;
 constexpr int64_t ndata        = 6;
 
 struct helper_ctx_data {
-    std::vector<struct ggml_opt_new_dataset *> datasets_supervised;
+    std::vector<struct ggml_opt_dataset *> datasets_supervised;
     std::vector<struct ggml_tensor          *> data_batch;
     std::vector<struct ggml_tensor          *> labels_batch;
 
-    struct ggml_opt_new_dataset * dataset_unsupervised;
+    struct ggml_opt_dataset * dataset_unsupervised;
     struct ggml_context         * ctx_static;
     struct ggml_context         * ctx_compute;
-    struct ggml_opt_new_params    opt_params;
-    struct ggml_opt_new_context * opt_ctx;
+    struct ggml_opt_params    opt_params;
+    struct ggml_opt_context * opt_ctx;
     struct ggml_tensor          * inputs;
     struct ggml_tensor          * weights;
     struct ggml_tensor          * outputs;
     ggml_backend_buffer_t         buf;
-    struct ggml_opt_new_result  * result;
-    struct ggml_opt_new_result  * result2;
+    struct ggml_opt_result  * result;
+    struct ggml_opt_result  * result2;
 };
 
 static helper_ctx_data helper_get_ctx_data(
@@ -40,13 +40,13 @@ static helper_ctx_data helper_get_ctx_data(
         const bool                  optimizer_defaults = true,
         int64_t                     nbatch_logical     = 1,
         int64_t                     nbatch_physical    = 1,
-        enum ggml_opt_new_loss_type loss_type          = GGML_OPT_NEW_LOSS_TYPE_SUM) {
-    std::vector<struct ggml_opt_new_dataset *> datasets(ndata);
+        enum ggml_opt_loss_type loss_type          = GGML_OPT_LOSS_TYPE_SUM) {
+    std::vector<struct ggml_opt_dataset *> datasets(ndata);
     for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
-        struct ggml_opt_new_dataset * dataset = ggml_opt_new_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
+        struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
 
-        float * data   = ggml_get_data_f32(ggml_opt_new_dataset_data(  dataset));
-        float * labels = ggml_get_data_f32(ggml_opt_new_dataset_labels(dataset));
+        float * data   = ggml_get_data_f32(ggml_opt_dataset_data(  dataset));
+        float * labels = ggml_get_data_f32(ggml_opt_dataset_labels(dataset));
 
         for (int64_t idata = 0; idata < ndata; ++idata) {
             for (int64_t id = 0; id < ne_datapoint; ++id) {
@@ -60,9 +60,9 @@ static helper_ctx_data helper_get_ctx_data(
         datasets[ndata_shard-1] = dataset;
     }
 
-    struct ggml_opt_new_dataset * dataset_unsupervised = ggml_opt_new_dataset_init(1, 0, ndata, /*ndata_shard =*/ 1);
+    struct ggml_opt_dataset * dataset_unsupervised = ggml_opt_dataset_init(1, 0, ndata, /*ndata_shard =*/ 1);
 
-    float * data = ggml_get_data_f32(ggml_opt_new_dataset_data(dataset_unsupervised));
+    float * data = ggml_get_data_f32(ggml_opt_dataset_data(dataset_unsupervised));
 
     for (int64_t idata = 0; idata < ndata; ++idata) {
         data[idata] = idata;
@@ -113,7 +113,7 @@ static helper_ctx_data helper_get_ctx_data(
     GGML_ASSERT(nbatch_logical % nbatch_physical == 0);
     const int32_t opt_period = nbatch_logical / nbatch_physical;
 
-    struct ggml_opt_new_params opt_params = ggml_opt_new_default_params(backend_sched, ctx_compute, inputs, outputs, loss_type);
+    struct ggml_opt_params opt_params = ggml_opt_default_params(backend_sched, ctx_compute, inputs, outputs, loss_type);
     opt_params.opt_period = opt_period;
     if (!optimizer_defaults) {
         // These default values make it easier to check optimization results vs. expected values.
@@ -122,25 +122,25 @@ static helper_ctx_data helper_get_ctx_data(
         opt_params.optimizer_params.adamw.beta2 = 0.0f;
         opt_params.optimizer_params.adamw.eps   = 0.0f;
     }
-    struct ggml_opt_new_context * opt_ctx = init_opt_ctx ? ggml_opt_new_init(opt_params) : nullptr;
+    struct ggml_opt_context * opt_ctx = init_opt_ctx ? ggml_opt_init(opt_params) : nullptr;
 
-    struct ggml_opt_new_result * result  = ggml_opt_new_result_init();
-    struct ggml_opt_new_result * result2 = ggml_opt_new_result_init();
+    struct ggml_opt_result * result  = ggml_opt_result_init();
+    struct ggml_opt_result * result2 = ggml_opt_result_init();
 
     return {datasets, data_batch, labels_batch, dataset_unsupervised, ctx_static, ctx_compute, opt_params, opt_ctx, inputs, weights, outputs, buf, result, result2};
 }
 
 static void helper_free_ctx_data(struct helper_ctx_data ctx_data) {
-    ggml_opt_new_result_free(ctx_data.result);
-    ggml_opt_new_result_free(ctx_data.result2);
-    ggml_opt_new_free(ctx_data.opt_ctx);
+    ggml_opt_result_free(ctx_data.result);
+    ggml_opt_result_free(ctx_data.result2);
+    ggml_opt_free(ctx_data.opt_ctx);
     ggml_backend_buffer_free(ctx_data.buf);
     ggml_free(ctx_data.ctx_static);
     ggml_free(ctx_data.ctx_compute);
-    for (struct ggml_opt_new_dataset * dataset : ctx_data.datasets_supervised) {
-        ggml_opt_new_dataset_free(dataset);
+    for (struct ggml_opt_dataset * dataset : ctx_data.datasets_supervised) {
+        ggml_opt_dataset_free(dataset);
     }
-    ggml_opt_new_dataset_free(ctx_data.dataset_unsupervised);
+    ggml_opt_dataset_free(ctx_data.dataset_unsupervised);
 }
 
 static void helper_after_test(
@@ -164,10 +164,10 @@ static std::pair<int, int> test_dataset(ggml_backend_sched_t backend_sched, ggml
     struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend);
 
     for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
-        struct ggml_opt_new_dataset * dataset = cd.datasets_supervised[ndata_shard-1];
+        struct ggml_opt_dataset * dataset = cd.datasets_supervised[ndata_shard-1];
 
         if (shuffle) {
-            ggml_opt_new_dataset_shuffle(cd.opt_ctx, dataset, -1);
+            ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
         }
 
         for (int64_t ndata_batch = 1; ndata_batch <= ndata; ++ndata_batch) {
@@ -185,7 +185,7 @@ static std::pair<int, int> test_dataset(ggml_backend_sched_t backend_sched, ggml
             std::vector<int64_t> idata_shuffled;
             const int64_t nbatches = ndata / ndata_batch;
             for (int64_t ibatch = 0; ibatch < nbatches; ++ibatch) {
-                ggml_opt_new_dataset_get_batch(dataset, data_batch, labels_batch, ibatch);
+                ggml_opt_dataset_get_batch(dataset, data_batch, labels_batch, ibatch);
 
                 ggml_backend_tensor_get(  data_batch,   data.data(), 0, ggml_nbytes(  data_batch));
                 ggml_backend_tensor_get(labels_batch, labels.data(), 0, ggml_nbytes(labels_batch));
@@ -254,7 +254,7 @@ static std::pair<int, int> test_forward_backward(
     int npass = 0;
 
     struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ true, /*optimizer_defaults =*/ false);
-    struct ggml_tensor * loss = ggml_opt_new_loss(cd.opt_ctx);
+    struct ggml_tensor * loss = ggml_opt_loss(cd.opt_ctx);
 
     std::vector<float> loss_history(ndata);
     std::vector<float> grad_history(ndata);
@@ -265,28 +265,28 @@ static std::pair<int, int> test_forward_backward(
 
     {
         int64_t ndata;
-        ggml_opt_new_result_ndata(cd.result, &ndata);
+        ggml_opt_result_ndata(cd.result, &ndata);
         double loss;
         double loss_unc;
-        ggml_opt_new_result_loss(cd.result, &loss, &loss_unc);
+        ggml_opt_result_loss(cd.result, &loss, &loss_unc);
         double accuracy;
         double accuracy_unc;
-        ggml_opt_new_result_accuracy(cd.result, &accuracy, &accuracy_unc);
+        ggml_opt_result_accuracy(cd.result, &accuracy, &accuracy_unc);
         const bool subtest_ok = ndata == 0 && loss == 0.0 && std::isnan(loss_unc) && std::isnan(accuracy) && std::isnan(accuracy_unc);
         helper_after_test_forward_backward(__func__, high_level, shuffle, "results_initial", subtest_ok, ntest, npass);
     }
 
     if (high_level) {
-        struct ggml_opt_new_dataset * dataset = cd.dataset_unsupervised;
+        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
         if (shuffle) {
-            ggml_opt_new_dataset_shuffle(cd.opt_ctx, dataset, -1);
+            ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
         }
-        ggml_opt_new_epoch(cd.opt_ctx, dataset, nullptr, cd.result, 0, nullptr, nullptr);
+        ggml_opt_epoch(cd.opt_ctx, dataset, nullptr, cd.result, 0, nullptr, nullptr);
     } else {
         for (int idata = 0; idata < ndata; ++idata) {
             const float idataf = idata;
             ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
-            ggml_opt_new_forward(cd.opt_ctx, cd.result);
+            ggml_opt_forward(cd.opt_ctx, cd.result);
             ggml_backend_tensor_get(loss, loss_history.data() + idata, 0, sizeof(float));
         }
     }
@@ -299,17 +299,17 @@ static std::pair<int, int> test_forward_backward(
     }
     {
         int64_t ndata;
-        ggml_opt_new_result_ndata(cd.result, &ndata);
+        ggml_opt_result_ndata(cd.result, &ndata);
         bool subtest_ok = ndata == 6;
 
         double loss;
         double loss_unc;
-        ggml_opt_new_result_loss(cd.result, &loss, &loss_unc);
+        ggml_opt_result_loss(cd.result, &loss, &loss_unc);
         subtest_ok = subtest_ok && loss == 33.0 && fabs(loss_unc - sqrt(3.5)) < 1e-10;
 
         double accuracy;
         double accuracy_unc;
-        ggml_opt_new_result_accuracy(cd.result, &accuracy, &accuracy_unc);
+        ggml_opt_result_accuracy(cd.result, &accuracy, &accuracy_unc);
         subtest_ok = subtest_ok && std::isnan(accuracy) && std::isnan(accuracy_unc);
 
         helper_after_test_forward_backward(__func__, high_level, shuffle, "results_after_forward", subtest_ok, ntest, npass);
@@ -318,12 +318,12 @@ static std::pair<int, int> test_forward_backward(
     float w0;
     ggml_backend_tensor_get(cd.weights, &w0, 0, sizeof(float));
     for (int i = 0; i < 10; ++i) {
-        ggml_opt_new_forward_backward(cd.opt_ctx, nullptr);
+        ggml_opt_forward_backward(cd.opt_ctx, nullptr);
     }
     ggml_backend_tensor_set(cd.weights, &w0, 0, sizeof(float));
 
-    ggml_opt_new_reset(cd.opt_ctx, /*optimizer =*/ false);
-    ggml_opt_new_result_reset(cd.result);
+    ggml_opt_reset(cd.opt_ctx, /*optimizer =*/ false);
+    ggml_opt_result_reset(cd.result);
 
     for (int64_t idata = 0; idata < ndata; ++idata) {
         loss_history[idata] = NAN;
@@ -331,16 +331,16 @@ static std::pair<int, int> test_forward_backward(
     }
 
     if (high_level) {
-        struct ggml_opt_new_dataset * dataset = cd.dataset_unsupervised;
+        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
         if (shuffle) {
-            ggml_opt_new_dataset_shuffle(cd.opt_ctx, dataset, -1);
+            ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
         }
-        ggml_opt_new_epoch(cd.opt_ctx, dataset, cd.result, nullptr, ndata, nullptr, nullptr);
+        ggml_opt_epoch(cd.opt_ctx, dataset, cd.result, nullptr, ndata, nullptr, nullptr);
     } else {
         for (int idata = 0; idata < ndata; ++idata) {
             const float idataf = idata;
             ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
-            ggml_opt_new_forward_backward(cd.opt_ctx, cd.result);
+            ggml_opt_forward_backward(cd.opt_ctx, cd.result);
             ggml_backend_tensor_get(loss,             loss_history.data() + idata, 0, sizeof(float));
             ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
         }
@@ -364,17 +364,17 @@ static std::pair<int, int> test_forward_backward(
     }
     {
         int64_t ndata;
-        ggml_opt_new_result_ndata(cd.result, &ndata);
+        ggml_opt_result_ndata(cd.result, &ndata);
         bool subtest_ok = ndata == 6;
 
         double loss;
         double loss_unc;
-        ggml_opt_new_result_loss(cd.result, &loss, &loss_unc);
+        ggml_opt_result_loss(cd.result, &loss, &loss_unc);
         subtest_ok = subtest_ok && loss == 18.0 && (shuffle || loss_unc == 0.0);
 
         double accuracy;
         double accuracy_unc;
-        ggml_opt_new_result_accuracy(cd.result, &accuracy, &accuracy_unc);
+        ggml_opt_result_accuracy(cd.result, &accuracy, &accuracy_unc);
         subtest_ok = subtest_ok && std::isnan(accuracy) && std::isnan(accuracy_unc);
 
         helper_after_test_forward_backward(__func__, high_level, shuffle, "result_after_forward_backward", subtest_ok, ntest, npass);
@@ -394,20 +394,20 @@ static std::pair<int, int> test_epoch_vs_fit(ggml_backend_sched_t backend_sched,
 
     {
         struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ true);
-        struct ggml_opt_new_dataset * dataset = cd.dataset_unsupervised;
+        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
 
-        ggml_opt_new_dataset_shuffle(cd.opt_ctx, dataset, -1);
-        ggml_opt_new_epoch(cd.opt_ctx, dataset, cd.result, nullptr, ndata, nullptr, nullptr);
+        ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
+        ggml_opt_epoch(cd.opt_ctx, dataset, cd.result, nullptr, ndata, nullptr, nullptr);
 
         ggml_backend_tensor_get(cd.weights, &weights_epoch, 0, ggml_nbytes(cd.weights));
         helper_free_ctx_data(cd);
     }
     {
         struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ false);
-        struct ggml_opt_new_dataset * dataset = cd.dataset_unsupervised;
+        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
 
-        ggml_opt_new_fit(backend_sched, cd.ctx_compute, cd.inputs, cd.outputs, dataset,
-            GGML_OPT_NEW_LOSS_TYPE_SUM, ggml_opt_new_default_optimizer_params(), 1, 1, 0.0f, true);
+        ggml_opt_fit(backend_sched, cd.ctx_compute, cd.inputs, cd.outputs, dataset,
+            GGML_OPT_LOSS_TYPE_SUM, ggml_opt_default_optimizer_params(), 1, 1, 0.0f, true);
 
         ggml_backend_tensor_get(cd.weights, &weights_fit, 0, ggml_nbytes(cd.weights));
         helper_free_ctx_data(cd);
@@ -440,7 +440,7 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
     int npass = 0;
 
     struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ true, /*optimizer_defaults =*/ false);
-    struct ggml_tensor * loss = ggml_opt_new_loss(cd.opt_ctx);
+    struct ggml_tensor * loss = ggml_opt_loss(cd.opt_ctx);
     const int idata_split = ndata * 2/3;
 
     std::vector<float> loss_history(ndata);
@@ -452,20 +452,20 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
 
     for (int epoch = 1; epoch <= 4; ++epoch) {
         if (high_level) {
-            ggml_opt_new_epoch(cd.opt_ctx, cd.dataset_unsupervised, cd.result, cd.result2, idata_split, nullptr, nullptr);
+            ggml_opt_epoch(cd.opt_ctx, cd.dataset_unsupervised, cd.result, cd.result2, idata_split, nullptr, nullptr);
         } else {
             int idata = 0;
             for (; idata < idata_split; ++idata) {
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
-                ggml_opt_new_forward_backward(cd.opt_ctx, cd.result);
+                ggml_opt_forward_backward(cd.opt_ctx, cd.result);
                 ggml_backend_tensor_get(loss,             loss_history.data() + idata, 0, sizeof(float));
                 ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
             }
             for (; idata < ndata; ++idata) {
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
-                ggml_opt_new_forward(cd.opt_ctx, cd.result2);
+                ggml_opt_forward(cd.opt_ctx, cd.result2);
                 ggml_backend_tensor_get(loss, loss_history.data() + idata, 0, sizeof(float));
             }
         }
@@ -488,41 +488,41 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
         }
         {
             int64_t ndata_result;
-            ggml_opt_new_result_ndata(cd.result, &ndata_result);
+            ggml_opt_result_ndata(cd.result, &ndata_result);
             bool subtest_ok = ndata_result == idata_split;
 
             double loss;
             double loss_unc;
-            ggml_opt_new_result_loss(cd.result, &loss, &loss_unc);
+            ggml_opt_result_loss(cd.result, &loss, &loss_unc);
             subtest_ok = subtest_ok && loss == 28.0 - epoch*16.0 && loss_unc == 0.0;
 
             double accuracy;
             double accuracy_unc;
-            ggml_opt_new_result_accuracy(cd.result, &accuracy, &accuracy_unc);
+            ggml_opt_result_accuracy(cd.result, &accuracy, &accuracy_unc);
             subtest_ok = subtest_ok && std::isnan(accuracy) && std::isnan(accuracy_unc);
 
             helper_after_test_idata_split(__func__, high_level, epoch, "results_backward", subtest_ok, ntest, npass);
         }
         {
             int64_t ndata_result;
-            ggml_opt_new_result_ndata(cd.result2, &ndata_result);
+            ggml_opt_result_ndata(cd.result2, &ndata_result);
             bool subtest_ok = ndata_result == ndata - idata_split;
 
             double loss;
             double loss_unc;
-            ggml_opt_new_result_loss(cd.result2, &loss, &loss_unc);
+            ggml_opt_result_loss(cd.result2, &loss, &loss_unc);
             subtest_ok = subtest_ok && loss == 15.0 - epoch*8 && fabs(loss_unc - sqrt(0.5)) < 1e-10;
 
             double accuracy;
             double accuracy_unc;
-            ggml_opt_new_result_accuracy(cd.result2, &accuracy, &accuracy_unc);
+            ggml_opt_result_accuracy(cd.result2, &accuracy, &accuracy_unc);
             subtest_ok = subtest_ok && std::isnan(accuracy) && std::isnan(accuracy_unc);
 
             helper_after_test_idata_split(__func__, high_level, epoch, "results_forward", subtest_ok, ntest, npass);
         }
 
-        ggml_opt_new_result_reset(cd.result);
-        ggml_opt_new_result_reset(cd.result2);
+        ggml_opt_result_reset(cd.result);
+        ggml_opt_result_reset(cd.result2);
     }
 
     helper_free_ctx_data(cd);
@@ -531,25 +531,25 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
 }
 
 static void helper_after_test_gradient_accumulation(
-        const char * func, const int nbatch_physical, const enum ggml_opt_new_loss_type loss_type, const int epoch,
+        const char * func, const int nbatch_physical, const enum ggml_opt_loss_type loss_type, const int epoch,
         const std::string subtest, const bool subtest_ok, int & ntest, int & npass) {
     std::string options = ", nbatch_physical=";
     options += std::to_string(nbatch_physical);
     options += ", loss_type=";
-    options += loss_type == GGML_OPT_NEW_LOSS_TYPE_MEAN ? "mean" : "sum";
+    options += loss_type == GGML_OPT_LOSS_TYPE_MEAN ? "mean" : "sum";
     options += ", epoch=";
     options += std::to_string(epoch);
     helper_after_test(func, false, options, subtest, subtest_ok, ntest, npass);
 }
 
 static std::pair<int, int> test_gradient_accumulation(
-        ggml_backend_sched_t backend_sched, ggml_backend_t backend, const int32_t nbatch_physical, const enum ggml_opt_new_loss_type loss_type) {
+        ggml_backend_sched_t backend_sched, ggml_backend_t backend, const int32_t nbatch_physical, const enum ggml_opt_loss_type loss_type) {
     int ntest = 0;
     int npass = 0;
 
     struct helper_ctx_data cd = helper_get_ctx_data(
         backend_sched, backend, /*init_opt_ctx =*/ true, /*optimizer_defaults =*/ false, /*nbatch_logical =*/ 2, nbatch_physical, loss_type);
-    struct ggml_tensor * loss = ggml_opt_new_loss(cd.opt_ctx);
+    struct ggml_tensor * loss = ggml_opt_loss(cd.opt_ctx);
 
     std::vector<float> grad_history(ndata);
     for (int64_t idata = 0; idata < ndata; ++idata) {
@@ -561,14 +561,14 @@ static std::pair<int, int> test_gradient_accumulation(
             for (int idata = 0; idata < ndata; ++idata) {
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, 1*sizeof(float));
-                ggml_opt_new_forward_backward(cd.opt_ctx, cd.result);
+                ggml_opt_forward_backward(cd.opt_ctx, cd.result);
                 ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, 1*sizeof(float));
             }
         } else if (nbatch_physical == 2) {
             for (int idata = 0; idata < ndata; idata += 2) {
                 const float idataf[2] = {float(idata + 0), float(idata + 1)};
                 ggml_backend_tensor_set(cd.inputs, idataf, 0, 2*sizeof(float));
-                ggml_opt_new_forward_backward(cd.opt_ctx, cd.result);
+                ggml_opt_forward_backward(cd.opt_ctx, cd.result);
 
                 grad_history[idata + 0] = 0.0f;
                 ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata + 1, 0, 1*sizeof(float));
@@ -580,10 +580,10 @@ static std::pair<int, int> test_gradient_accumulation(
         {
             bool subtest_ok = true;
             for (int idata = 0; idata < ndata; idata += 2) {
-                if (loss_type == GGML_OPT_NEW_LOSS_TYPE_SUM) {
+                if (loss_type == GGML_OPT_LOSS_TYPE_SUM) {
                     subtest_ok = subtest_ok && grad_history[idata + 0] == (nbatch_physical == 1 ? 1.0f : 0.0f);
                     subtest_ok = subtest_ok && grad_history[idata + 1] == (nbatch_physical == 1 ? 0.0f : 2.0f);
-                } else if (loss_type == GGML_OPT_NEW_LOSS_TYPE_MEAN) {
+                } else if (loss_type == GGML_OPT_LOSS_TYPE_MEAN) {
                     subtest_ok = subtest_ok && grad_history[idata + 0] == (nbatch_physical == 1 ? 0.5f : 0.0f);
                     subtest_ok = subtest_ok && grad_history[idata + 1] == (nbatch_physical == 1 ? 0.0f : 1.0f);
                 } else {
@@ -600,14 +600,14 @@ static std::pair<int, int> test_gradient_accumulation(
         }
         {
             int64_t ndata_result;
-            ggml_opt_new_result_ndata(cd.result, &ndata_result);
+            ggml_opt_result_ndata(cd.result, &ndata_result);
             bool subtest_ok = ndata_result == ndata/nbatch_physical;
 
             double loss;
-            ggml_opt_new_result_loss(cd.result, &loss, /*loss_unc =*/ nullptr);
-            if (loss_type == GGML_OPT_NEW_LOSS_TYPE_SUM) {
+            ggml_opt_result_loss(cd.result, &loss, /*loss_unc =*/ nullptr);
+            if (loss_type == GGML_OPT_LOSS_TYPE_SUM) {
                 subtest_ok = subtest_ok && loss == (45.0 - epoch*18.0);
-            } else if (loss_type == GGML_OPT_NEW_LOSS_TYPE_MEAN) {
+            } else if (loss_type == GGML_OPT_LOSS_TYPE_MEAN) {
                 subtest_ok = subtest_ok && loss == (45.0 - epoch*18.0) / ndata;
             } else {
                 GGML_ASSERT(false);
@@ -615,13 +615,13 @@ static std::pair<int, int> test_gradient_accumulation(
 
             double accuracy;
             double accuracy_unc;
-            ggml_opt_new_result_accuracy(cd.result, &accuracy, &accuracy_unc);
+            ggml_opt_result_accuracy(cd.result, &accuracy, &accuracy_unc);
             subtest_ok = subtest_ok && std::isnan(accuracy) && std::isnan(accuracy_unc);
 
             helper_after_test_gradient_accumulation(__func__, nbatch_physical, loss_type, epoch, "results", subtest_ok, ntest, npass);
         }
 
-        ggml_opt_new_result_reset(cd.result);
+        ggml_opt_result_reset(cd.result);
     }
 
     helper_free_ctx_data(cd);
@@ -642,10 +642,10 @@ static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, g
     std::mt19937 gen(12345);
     std::normal_distribution<float> nd{0.0f, 0.1f};
 
-    struct ggml_opt_new_dataset * dataset = ggml_opt_new_dataset_init(1, 1, ndata_regression, ndata_regression);
+    struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(1, 1, ndata_regression, ndata_regression);
 
-    float * data   = ggml_get_data_f32(ggml_opt_new_dataset_data(  dataset));
-    float * labels = ggml_get_data_f32(ggml_opt_new_dataset_labels(dataset));
+    float * data   = ggml_get_data_f32(ggml_opt_dataset_data(  dataset));
+    float * labels = ggml_get_data_f32(ggml_opt_dataset_labels(dataset));
 
     constexpr float x_min = -100.0f;
     constexpr float x_max =  100.0f;
@@ -699,10 +699,10 @@ static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, g
     ggml_backend_tensor_set(a, &a0, 0, sizeof(float));
     ggml_backend_tensor_set(b, &b0, 0, sizeof(float));
 
-    ggml_opt_new_optimizer_params optimizer_params = ggml_opt_new_default_optimizer_params();
+    ggml_opt_optimizer_params optimizer_params = ggml_opt_default_optimizer_params();
     optimizer_params.adamw.alpha = 0.1f;
-    ggml_opt_new_fit(backend_sched, ctx_compute, x, f, dataset,
-        GGML_OPT_NEW_LOSS_TYPE_MEAN_SQUARED_ERROR, optimizer_params, 100, ndata_regression, 0.0f, true);
+    ggml_opt_fit(backend_sched, ctx_compute, x, f, dataset,
+        GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR, optimizer_params, 100, ndata_regression, 0.0f, true);
 
     {
         float a_fit;
@@ -722,7 +722,7 @@ static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, g
 
     ggml_backend_buffer_free(buf);
     ggml_free(ctx_static);
-    ggml_opt_new_dataset_free(dataset);
+    ggml_opt_dataset_free(dataset);
 
     return std::make_pair(npass, ntest);
 }
@@ -758,7 +758,7 @@ static std::pair<int, int> test_backend(ggml_backend_sched_t backend_sched, ggml
         ntest += partial.second;
     }
     for (int32_t nbatch_physical : {2, 1}) {
-        for (enum ggml_opt_new_loss_type loss_type : {GGML_OPT_NEW_LOSS_TYPE_SUM, GGML_OPT_NEW_LOSS_TYPE_MEAN}) {
+        for (enum ggml_opt_loss_type loss_type : {GGML_OPT_LOSS_TYPE_SUM, GGML_OPT_LOSS_TYPE_MEAN}) {
             std::pair<int, int> partial = test_gradient_accumulation(backend_sched, backend, nbatch_physical, loss_type);
             npass += partial.first;
             ntest += partial.second;

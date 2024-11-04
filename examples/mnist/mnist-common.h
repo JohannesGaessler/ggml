@@ -211,13 +211,13 @@ struct mnist_model {
     }
 };
 
-bool mnist_image_load(const std::string & fname, ggml_opt_new_dataset * dataset);
-void mnist_image_print(FILE * f, ggml_opt_new_dataset * dataset, const int iex);
-bool mnist_label_load(const std::string & fname, ggml_opt_new_dataset * dataset);
+bool mnist_image_load(const std::string & fname, ggml_opt_dataset * dataset);
+void mnist_image_print(FILE * f, ggml_opt_dataset * dataset, const int iex);
+bool mnist_label_load(const std::string & fname, ggml_opt_dataset * dataset);
 
 mnist_model           mnist_model_init_from_file(const std::string & fname, const std::string & backend, const int nbatch_logical, const int nbatch_physical);
 mnist_model           mnist_model_init_random(const std::string & arch, const std::string & backend, const int nbatch_logical, const int nbatch_physical);
 void                  mnist_model_build(mnist_model & model);
-ggml_opt_new_result * mnist_model_eval(mnist_model & model, ggml_opt_new_dataset * dataset);
-void                  mnist_model_train(mnist_model & model, ggml_opt_new_dataset * dataset, const int nepoch, const float val_split);
+ggml_opt_result * mnist_model_eval(mnist_model & model, ggml_opt_dataset * dataset);
+void                  mnist_model_train(mnist_model & model, ggml_opt_dataset * dataset, const int nepoch, const float val_split);
 void                  mnist_model_save(mnist_model & model, const std::string & fname);
