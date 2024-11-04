@@ -172,11 +172,11 @@ void ggml_opt_dataset_get_batch(struct ggml_opt_dataset * dataset, struct ggml_t
 struct ggml_opt_optimizer_params ggml_opt_default_optimizer_params(){
     return {
         /*adamw =*/ {
-            /*alpha      =*/ 0.001f,
-            /*beta1      =*/ 0.9f,
-            /*beta2      =*/ 0.999f,
-            /*eps        =*/ 1e-8f,
-            /*wd         =*/ 0.0f,
+            /*alpha =*/ 0.001f,
+            /*beta1 =*/ 0.9f,
+            /*beta2 =*/ 0.999f,
+            /*eps   =*/ 1e-8f,
+            /*wd    =*/ 0.0f,
         },
     };
 }
@@ -188,13 +188,13 @@ struct ggml_opt_params ggml_opt_default_params(
         struct ggml_tensor * outputs,
         enum ggml_opt_loss_type loss_type) {
     return {
-        /*backend_sched =*/ backend_sched,
-        /*ctx_compute =*/ ctx_compute,
-        /*inputs     =*/ inputs,
-        /*logits     =*/ outputs,
-        /*loss_type  =*/ loss_type,
-        /*forward_only =*/ false,
-        /*opt_period =*/ 1,
+        /*backend_sched    =*/ backend_sched,
+        /*ctx_compute      =*/ ctx_compute,
+        /*inputs           =*/ inputs,
+        /*logits           =*/ outputs,
+        /*loss_type        =*/ loss_type,
+        /*forward_only     =*/ false,
+        /*opt_period       =*/ 1,
         /*optimizer_params =*/ ggml_opt_default_optimizer_params(),
     };
 }
@@ -216,14 +216,14 @@ static void ggml_opt_alloc_graph(struct ggml_opt_context * opt_ctx, ggml_cgraph 
 
 struct ggml_opt_context * ggml_opt_init(struct ggml_opt_params params) {
     struct ggml_opt_context * result = new struct ggml_opt_context;
-    result->backend_sched = params.backend_sched;
+    result->backend_sched   = params.backend_sched;
     result->allocated_graph = nullptr;
-    result->ctx_compute = params.ctx_compute;
-    result->inputs     = params.inputs;
-    result->outputs    = params.outputs;
-    result->forward_only = params.forward_only;
-    result->opt_period = params.opt_period;
-    result->opt_i      = 0;
+    result->ctx_compute     = params.ctx_compute;
+    result->inputs          = params.inputs;
+    result->outputs         = params.outputs;
+    result->forward_only    = params.forward_only;
+    result->opt_period      = params.opt_period;
+    result->opt_i           = 0;
 
     GGML_ASSERT(result->inputs->data && "the inputs must be allocated statically");
     GGML_ASSERT(result->opt_period >= 1);
@@ -550,7 +550,7 @@ void ggml_opt_epoch(
         struct ggml_opt_dataset * dataset,
         struct ggml_opt_result  * result_train,
         struct ggml_opt_result  * result_eval,
-        int64_t                       idata_split,
+        int64_t                   idata_split,
         ggml_opt_epoch_callback   callback_train,
         ggml_opt_epoch_callback   callback_eval) {
     struct ggml_tensor * inputs = ggml_opt_inputs(opt_ctx);
@@ -588,13 +588,13 @@ void ggml_opt_epoch(
 }
 
 void ggml_opt_epoch_callback_progress_bar(
-        bool                          train,
+        bool                      train,
         struct ggml_opt_context * opt_ctx,
         struct ggml_opt_dataset * dataset,
         struct ggml_opt_result  * result,
-        int64_t                       ibatch,
-        int64_t                       ibatch_max,
-        int64_t                       t_start_us) {
+        int64_t                   ibatch,
+        int64_t                   ibatch_max,
+        int64_t                   t_start_us) {
     fprintf(stderr, "%s[", train ? "train: " : "val:   ");
 
     constexpr int64_t bar_length = 40;
@@ -647,17 +647,17 @@ void ggml_opt_epoch_callback_progress_bar(
 }
 
 void ggml_opt_fit(
-        ggml_backend_sched_t            backend_sched,
-        ggml_context                  * ctx_compute,
-        ggml_tensor                   * inputs,
-        ggml_tensor                   * outputs,
+        ggml_backend_sched_t        backend_sched,
+        ggml_context              * ctx_compute,
+        ggml_tensor               * inputs,
+        ggml_tensor               * outputs,
         ggml_opt_dataset          * dataset,
         enum ggml_opt_loss_type     loss_type,
         ggml_opt_optimizer_params   optimizer_params,
-        int64_t                         nepoch,
-        int64_t                         nbatch_logical,
-        float                           val_split,
-        bool                            silent) {
+        int64_t                     nepoch,
+        int64_t                     nbatch_logical,
+        float                       val_split,
+        bool                        silent) {
     ggml_time_init();
     const int64_t t_start_us = ggml_time_us();
 

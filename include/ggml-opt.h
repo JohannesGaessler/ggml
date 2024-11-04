@@ -47,9 +47,9 @@ extern "C" {
     // get batch at position ibatch from dataset and copy the data to data_batch and labels_batch
     GGML_API void ggml_opt_dataset_get_batch(
             struct ggml_opt_dataset * dataset,
-            struct ggml_tensor          * data_batch,   // shape = [ne_datapoint, ndata_batch]
-            struct ggml_tensor          * labels_batch, // shape = [ne_label,     ndata_batch]
-            int64_t                       ibatch);
+            struct ggml_tensor      * data_batch,   // shape = [ne_datapoint, ndata_batch]
+            struct ggml_tensor      * labels_batch, // shape = [ne_label,     ndata_batch]
+            int64_t                   ibatch);
 
     // ====== Model / Context ======
 
@@ -89,10 +89,10 @@ extern "C" {
     // get parameters for an optimization context with defaults set where possible
     // parameters for which no sensible defaults exist are supplied as arguments to this function
     GGML_API ggml_opt_params ggml_opt_default_params(
-            ggml_backend_sched_t          backend_sched,
-            struct ggml_context         * ctx_compute,
-            struct ggml_tensor          * inputs,
-            struct ggml_tensor          * outputs,
+            ggml_backend_sched_t      backend_sched,
+            struct ggml_context     * ctx_compute,
+            struct ggml_tensor      * inputs,
+            struct ggml_tensor      * outputs,
             enum ggml_opt_loss_type   loss_type);
 
     GGML_API struct ggml_opt_context * ggml_opt_init(struct ggml_opt_params params);

@@ -17,29 +17,29 @@ constexpr int64_t ndata        = 6;
 
 struct helper_ctx_data {
     std::vector<struct ggml_opt_dataset *> datasets_supervised;
-    std::vector<struct ggml_tensor          *> data_batch;
-    std::vector<struct ggml_tensor          *> labels_batch;
+    std::vector<struct ggml_tensor      *> data_batch;
+    std::vector<struct ggml_tensor      *> labels_batch;
 
     struct ggml_opt_dataset * dataset_unsupervised;
-    struct ggml_context         * ctx_static;
-    struct ggml_context         * ctx_compute;
+    struct ggml_context     * ctx_static;
+    struct ggml_context     * ctx_compute;
     struct ggml_opt_params    opt_params;
     struct ggml_opt_context * opt_ctx;
-    struct ggml_tensor          * inputs;
-    struct ggml_tensor          * weights;
-    struct ggml_tensor          * outputs;
-    ggml_backend_buffer_t         buf;
+    struct ggml_tensor      * inputs;
+    struct ggml_tensor      * weights;
+    struct ggml_tensor      * outputs;
+    ggml_backend_buffer_t     buf;
     struct ggml_opt_result  * result;
     struct ggml_opt_result  * result2;
 };
 
 static helper_ctx_data helper_get_ctx_data(
-        ggml_backend_sched_t        backend_sched,
-        ggml_backend_t              backend,
-        const bool                  init_opt_ctx       = true,
-        const bool                  optimizer_defaults = true,
-        int64_t                     nbatch_logical     = 1,
-        int64_t                     nbatch_physical    = 1,
+        ggml_backend_sched_t    backend_sched,
+        ggml_backend_t          backend,
+        const bool              init_opt_ctx       = true,
+        const bool              optimizer_defaults = true,
+        int64_t                 nbatch_logical     = 1,
+        int64_t                 nbatch_physical    = 1,
         enum ggml_opt_loss_type loss_type          = GGML_OPT_LOSS_TYPE_SUM) {
     std::vector<struct ggml_opt_dataset *> datasets(ndata);
     for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
