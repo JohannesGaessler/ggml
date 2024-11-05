@@ -635,7 +635,8 @@ void ggml_opt_epoch_callback_progress_bar(
     const int64_t t_eta_m = t_eta_s / 60;
     t_eta_s -= t_eta_m * 60;
 
-    fprintf(stderr, "| data=%06ld/%06ld, loss=%.6lf+-%.6lf, accuracy=%.2lf+-%.2lf%%, t=%02ld:%02ld:%02ld, ETA=%02ld:%02ld:%02ld]\r",
+    fprintf(stderr, "| data=%06" PRId64 "/%06" PRId64 ", loss=%.6lf+-%.6lf, accuracy=%.2lf+-%.2lf%%, "
+            "t=%02" PRId64 ":%02" PRId64 ":%02" PRId64 ", ETA=%02" PRId64 ":%02" PRId64 ":%02" PRId64 "]\r",
             idata, idata_max, loss, loss_unc, 100.0*accuracy, 100.0*accuracy_unc,
             t_ibatch_h, t_ibatch_m, t_ibatch_s, t_eta_h, t_eta_m, t_eta_s);
     if (ibatch == ibatch_max) {
@@ -712,7 +713,7 @@ void ggml_opt_fit(
         t_total_s -= t_total_h * 3600;
         const int64_t t_total_m = t_total_s / 60;
         t_total_s -= t_total_m * 60;
-        fprintf(stderr, "%s: training took %02ld:%02ld:%02ld\n", __func__, t_total_h, t_total_m, t_total_s);
+        fprintf(stderr, "%s: training took %02" PRId64 ":%02" PRId64 ":%02" PRId64 "\n", __func__, t_total_h, t_total_m, t_total_s);
     }
 
     ggml_opt_free(opt_ctx);
