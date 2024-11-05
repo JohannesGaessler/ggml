@@ -16,21 +16,21 @@ constexpr int64_t ne_label     = 1;
 constexpr int64_t ndata        = 6;
 
 struct helper_ctx_data {
-    std::vector<struct ggml_opt_dataset *> datasets_supervised;
-    std::vector<struct ggml_tensor      *> data_batch;
-    std::vector<struct ggml_tensor      *> labels_batch;
+    std::vector<ggml_opt_dataset_t>   datasets_supervised;
+    std::vector<struct ggml_tensor *> data_batch;
+    std::vector<struct ggml_tensor *> labels_batch;
 
-    struct ggml_opt_dataset * dataset_unsupervised;
-    struct ggml_context     * ctx_static;
-    struct ggml_context     * ctx_compute;
-    struct ggml_opt_params    opt_params;
-    struct ggml_opt_context * opt_ctx;
-    struct ggml_tensor      * inputs;
-    struct ggml_tensor      * weights;
-    struct ggml_tensor      * outputs;
-    ggml_backend_buffer_t     buf;
-    struct ggml_opt_result  * result;
-    struct ggml_opt_result  * result2;
+    ggml_opt_dataset_t       dataset_unsupervised;
+    struct ggml_context    * ctx_static;
+    struct ggml_context    * ctx_compute;
+    struct ggml_opt_params   opt_params;
+    ggml_opt_context_t       opt_ctx;
+    struct ggml_tensor     * inputs;
+    struct ggml_tensor     * weights;
+    struct ggml_tensor     * outputs;
+    ggml_backend_buffer_t    buf;
+    ggml_opt_result_t        result;
+    ggml_opt_result_t        result2;
 };
 
 static helper_ctx_data helper_get_ctx_data(
@@ -41,9 +41,9 @@ static helper_ctx_data helper_get_ctx_data(
         int64_t                 nbatch_logical     = 1,
         int64_t                 nbatch_physical    = 1,
         enum ggml_opt_loss_type loss_type          = GGML_OPT_LOSS_TYPE_SUM) {
-    std::vector<struct ggml_opt_dataset *> datasets(ndata);
+    std::vector<ggml_opt_dataset_t> datasets(ndata);
     for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
-        struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
+        ggml_opt_dataset_t dataset = ggml_opt_dataset_init(ne_datapoint, ne_label, ndata, ndata_shard);
 
         float * data   = ggml_get_data_f32(ggml_opt_dataset_data(  dataset));
         float * labels = ggml_get_data_f32(ggml_opt_dataset_labels(dataset));
@@ -60,7 +60,7 @@ static helper_ctx_data helper_get_ctx_data(
         datasets[ndata_shard-1] = dataset;
     }
 
-    struct ggml_opt_dataset * dataset_unsupervised = ggml_opt_dataset_init(1, 0, ndata, /*ndata_shard =*/ 1);
+    ggml_opt_dataset_t dataset_unsupervised = ggml_opt_dataset_init(1, 0, ndata, /*ndata_shard =*/ 1);
 
     float * data = ggml_get_data_f32(ggml_opt_dataset_data(dataset_unsupervised));
 
@@ -122,10 +122,10 @@ static helper_ctx_data helper_get_ctx_data(
         opt_params.optimizer_params.adamw.beta2 = 0.0f;
         opt_params.optimizer_params.adamw.eps   = 0.0f;
     }
-    struct ggml_opt_context * opt_ctx = init_opt_ctx ? ggml_opt_init(opt_params) : nullptr;
+    ggml_opt_context_t opt_ctx = init_opt_ctx ? ggml_opt_init(opt_params) : nullptr;
 
-    struct ggml_opt_result * result  = ggml_opt_result_init();
-    struct ggml_opt_result * result2 = ggml_opt_result_init();
+    ggml_opt_result_t result  = ggml_opt_result_init();
+    ggml_opt_result_t result2 = ggml_opt_result_init();
 
     return {datasets, data_batch, labels_batch, dataset_unsupervised, ctx_static, ctx_compute, opt_params, opt_ctx, inputs, weights, outputs, buf, result, result2};
 }
@@ -137,7 +137,7 @@ static void helper_free_ctx_data(struct helper_ctx_data ctx_data) {
     ggml_backend_buffer_free(ctx_data.buf);
     ggml_free(ctx_data.ctx_static);
     ggml_free(ctx_data.ctx_compute);
-    for (struct ggml_opt_dataset * dataset : ctx_data.datasets_supervised) {
+    for (ggml_opt_dataset_t dataset : ctx_data.datasets_supervised) {
         ggml_opt_dataset_free(dataset);
     }
     ggml_opt_dataset_free(ctx_data.dataset_unsupervised);
@@ -164,7 +164,7 @@ static std::pair<int, int> test_dataset(ggml_backend_sched_t backend_sched, ggml
     struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend);
 
     for (int64_t ndata_shard = 1; ndata_shard <= ndata; ++ndata_shard) {
-        struct ggml_opt_dataset * dataset = cd.datasets_supervised[ndata_shard-1];
+        ggml_opt_dataset_t dataset = cd.datasets_supervised[ndata_shard-1];
 
         if (shuffle) {
             ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
@@ -277,7 +277,7 @@ static std::pair<int, int> test_forward_backward(
     }
 
     if (high_level) {
-        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
+        ggml_opt_dataset_t dataset = cd.dataset_unsupervised;
         if (shuffle) {
             ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
         }
@@ -331,7 +331,7 @@ static std::pair<int, int> test_forward_backward(
     }
 
     if (high_level) {
-        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
+        ggml_opt_dataset_t dataset = cd.dataset_unsupervised;
         if (shuffle) {
             ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
         }
@@ -394,7 +394,7 @@ static std::pair<int, int> test_epoch_vs_fit(ggml_backend_sched_t backend_sched,
 
     {
         struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ true);
-        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
+        ggml_opt_dataset_t dataset = cd.dataset_unsupervised;
 
         ggml_opt_dataset_shuffle(cd.opt_ctx, dataset, -1);
         ggml_opt_epoch(cd.opt_ctx, dataset, cd.result, nullptr, ndata, nullptr, nullptr);
@@ -404,7 +404,7 @@ static std::pair<int, int> test_epoch_vs_fit(ggml_backend_sched_t backend_sched,
     }
     {
         struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ false);
-        struct ggml_opt_dataset * dataset = cd.dataset_unsupervised;
+        ggml_opt_dataset_t dataset = cd.dataset_unsupervised;
 
         ggml_opt_fit(backend_sched, cd.ctx_compute, cd.inputs, cd.outputs, dataset,
             GGML_OPT_LOSS_TYPE_SUM, ggml_opt_default_optimizer_params(), 1, 1, 0.0f, true);
@@ -642,7 +642,7 @@ static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, g
     std::mt19937 gen(12345);
     std::normal_distribution<float> nd{0.0f, 0.1f};
 
-    struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(1, 1, ndata_regression, ndata_regression);
+    ggml_opt_dataset_t dataset = ggml_opt_dataset_init(1, 1, ndata_regression, ndata_regression);
 
     float * data   = ggml_get_data_f32(ggml_opt_dataset_data(  dataset));
     float * labels = ggml_get_data_f32(ggml_opt_dataset_labels(dataset));

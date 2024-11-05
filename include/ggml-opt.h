@@ -1,6 +1,8 @@
 // This file contains functionality for training models using GGML.
 // It is not strictly needed vs. just vanilla GGML but it provides a more high-level interface for common needs such as datasets.
 // At the bottom of this file especially there are relatively high-level functions that are suitable use or adaptation in user code.
+//
+// Module maintainer: Johannes Gäßler (@JohannesGaessler, johannesg@5d6.de)
 
 #pragma once
 
@@ -17,6 +19,10 @@ extern "C" {
     struct ggml_opt_context;
     struct ggml_opt_result;
 
+    typedef struct ggml_opt_dataset * ggml_opt_dataset_t;
+    typedef struct ggml_opt_context * ggml_opt_context_t;
+    typedef struct ggml_opt_result  * ggml_opt_result_t;
+
     // ====== Loss ======
 
     // built-in loss types the quantity minimized by the optimizer
@@ -30,26 +36,26 @@ extern "C" {
 
     // ====== Dataset ======
 
-    GGML_API struct ggml_opt_dataset * ggml_opt_dataset_init(
+    GGML_API ggml_opt_dataset_t ggml_opt_dataset_init(
             int64_t ne_datapoint, // number of elements per datapoint
             int64_t ne_label,     // number of elements per label
             int64_t ndata,        // total number of datapoints/labels
             int64_t ndata_shard); // number of datapoints/labels per shard (unit at which the dataset is shuffled/copied)
-    GGML_API void ggml_opt_dataset_free(struct ggml_opt_dataset * dataset);
+    GGML_API void ggml_opt_dataset_free(ggml_opt_dataset_t dataset);
 
     // get underlying tensors that store the data
-    GGML_API struct ggml_tensor * ggml_opt_dataset_data  (struct ggml_opt_dataset * dataset); // shape = [ne_datapoint, ndata]
-    GGML_API struct ggml_tensor * ggml_opt_dataset_labels(struct ggml_opt_dataset * dataset); // shape = [nd_label,     ndata]
+    GGML_API struct ggml_tensor * ggml_opt_dataset_data  (ggml_opt_dataset_t dataset); // shape = [ne_datapoint, ndata]
+    GGML_API struct ggml_tensor * ggml_opt_dataset_labels(ggml_opt_dataset_t dataset); // shape = [nd_label,     ndata]
 
     // shuffle idata first datapoints from dataset with RNG from opt_ctx, shuffle all datapoints if idata is negative
-    GGML_API void ggml_opt_dataset_shuffle(struct ggml_opt_context * opt_ctx, struct ggml_opt_dataset * dataset, int64_t idata);
+    GGML_API void ggml_opt_dataset_shuffle(ggml_opt_context_t opt_ctx, ggml_opt_dataset_t dataset, int64_t idata);
 
     // get batch at position ibatch from dataset and copy the data to data_batch and labels_batch
     GGML_API void ggml_opt_dataset_get_batch(
-            struct ggml_opt_dataset * dataset,
-            struct ggml_tensor      * data_batch,   // shape = [ne_datapoint, ndata_batch]
-            struct ggml_tensor      * labels_batch, // shape = [ne_label,     ndata_batch]
-            int64_t                   ibatch);
+            ggml_opt_dataset_t   dataset,
+            struct ggml_tensor * data_batch,   // shape = [ne_datapoint, ndata_batch]
+            struct ggml_tensor * labels_batch, // shape = [ne_label,     ndata_batch]
+            int64_t              ibatch);
 
     // ====== Model / Context ======
 
@@ -95,39 +101,39 @@ extern "C" {
             struct ggml_tensor      * outputs,
             enum ggml_opt_loss_type   loss_type);
 
-    GGML_API struct ggml_opt_context * ggml_opt_init(struct ggml_opt_params params);
-    GGML_API void ggml_opt_free(struct ggml_opt_context * opt_ctx);
+    GGML_API ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params);
+    GGML_API void ggml_opt_free(ggml_opt_context_t opt_ctx);
 
     // set gradients to zero, initilize loss, and optionally reset the optimizer
-    GGML_API void ggml_opt_reset(struct ggml_opt_context * opt_ctx, bool optimizer);
+    GGML_API void ggml_opt_reset(ggml_opt_context_t opt_ctx, bool optimizer);
 
     // get underlying tensors that store data
-    GGML_API struct ggml_tensor * ggml_opt_inputs(  struct ggml_opt_context * opt_ctx); // forward graph input tensor
-    GGML_API struct ggml_tensor * ggml_opt_outputs( struct ggml_opt_context * opt_ctx); // forward graph output tensor
-    GGML_API struct ggml_tensor * ggml_opt_labels(  struct ggml_opt_context * opt_ctx); // labels to compare outputs against
-    GGML_API struct ggml_tensor * ggml_opt_loss(    struct ggml_opt_context * opt_ctx); // scalar tensor that contains the loss
-    GGML_API struct ggml_tensor * ggml_opt_pred(    struct ggml_opt_context * opt_ctx); // predictions made by outputs
-    GGML_API struct ggml_tensor * ggml_opt_ncorrect(struct ggml_opt_context * opt_ctx); // number of matching predictions between outputs and labels
+    GGML_API struct ggml_tensor * ggml_opt_inputs(  ggml_opt_context_t opt_ctx); // forward graph input tensor
+    GGML_API struct ggml_tensor * ggml_opt_outputs( ggml_opt_context_t opt_ctx); // forward graph output tensor
+    GGML_API struct ggml_tensor * ggml_opt_labels(  ggml_opt_context_t opt_ctx); // labels to compare outputs against
+    GGML_API struct ggml_tensor * ggml_opt_loss(    ggml_opt_context_t opt_ctx); // scalar tensor that contains the loss
+    GGML_API struct ggml_tensor * ggml_opt_pred(    ggml_opt_context_t opt_ctx); // predictions made by outputs
+    GGML_API struct ggml_tensor * ggml_opt_ncorrect(ggml_opt_context_t opt_ctx); // number of matching predictions between outputs and labels
 
     // ====== Optimization Result ======
 
-    GGML_API struct ggml_opt_result * ggml_opt_result_init();
-    GGML_API void ggml_opt_result_free(struct ggml_opt_result * result);
-    GGML_API void ggml_opt_result_reset(struct ggml_opt_result * result);
+    GGML_API ggml_opt_result_t ggml_opt_result_init();
+    GGML_API void ggml_opt_result_free(ggml_opt_result_t result);
+    GGML_API void ggml_opt_result_reset(ggml_opt_result_t result);
 
     // get data from result, uncertainties are optional and can be ignored by passing NULL
-    GGML_API void ggml_opt_result_ndata(   struct ggml_opt_result * result, int64_t * ndata);                  // write 1 value, number of datapoints
-    GGML_API void ggml_opt_result_loss(    struct ggml_opt_result * result, double  * loss,     double * unc); // write 1 value
-    GGML_API void ggml_opt_result_pred(    struct ggml_opt_result * result, int32_t * pred);                   // write ndata values
-    GGML_API void ggml_opt_result_accuracy(struct ggml_opt_result * result, double  * accuracy, double * unc); // write 1 value
+    GGML_API void ggml_opt_result_ndata(   ggml_opt_result_t result, int64_t * ndata);                  // write 1 value, number of datapoints
+    GGML_API void ggml_opt_result_loss(    ggml_opt_result_t result, double  * loss,     double * unc); // write 1 value
+    GGML_API void ggml_opt_result_pred(    ggml_opt_result_t result, int32_t * pred);                   // write ndata values
+    GGML_API void ggml_opt_result_accuracy(ggml_opt_result_t result, double  * accuracy, double * unc); // write 1 value
 
     // ====== Computation ======
 
     // do forward pass, increment result if not NULL
-    GGML_API void ggml_opt_forward(struct ggml_opt_context * opt_ctx, struct ggml_opt_result  * result);
+    GGML_API void ggml_opt_forward(ggml_opt_context_t opt_ctx, ggml_opt_result_t result);
 
     // do forward pass, increment result if not NULL, do backward pass
-    GGML_API void ggml_opt_forward_backward(struct ggml_opt_context * opt_ctx, struct ggml_opt_result * result);
+    GGML_API void ggml_opt_forward_backward(ggml_opt_context_t opt_ctx, ggml_opt_result_t result);
 
     // ############################################################################
     // ## The high-level functions start here. They do not depend on any private ##
@@ -148,33 +154,33 @@ extern "C" {
 
     // signature for a callback while evaluating opt_ctx on dataset, called after an evaluation
     typedef void (*ggml_opt_epoch_callback)(
-            bool                      train,       // true after training evaluation, false after validation evaluation
-            struct ggml_opt_context * opt_ctx,
-            struct ggml_opt_dataset * dataset,
-            struct ggml_opt_result  * result,      // result associated with the dataset subsection
-            int64_t                   ibatch,      // number of batches that have been evaluated so far
-            int64_t                   ibatch_max,  // total number of batches in this dataset subsection
-            int64_t                   t_start_us); // time at which the evaluation on the dataset subsection was started
+            bool               train,       // true after training evaluation, false after validation evaluation
+            ggml_opt_context_t opt_ctx,
+            ggml_opt_dataset_t dataset,
+            ggml_opt_result_t  result,      // result associated with the dataset subsection
+            int64_t            ibatch,      // number of batches that have been evaluated so far
+            int64_t            ibatch_max,  // total number of batches in this dataset subsection
+            int64_t            t_start_us); // time at which the evaluation on the dataset subsection was started
 
     // do training on front of dataset, do evaluation only on back of dataset
     GGML_API void ggml_opt_epoch(
-            struct ggml_opt_context * opt_ctx,
-            struct ggml_opt_dataset * dataset,
-            struct ggml_opt_result  * result_train,   // result to increment during training, ignored if NULL
-            struct ggml_opt_result  * result_eval,    // result to increment during evaluation, ignored if NULL
-            int64_t                   idata_split,    // data index at which to split training and evaluation
-            ggml_opt_epoch_callback   callback_train,
-            ggml_opt_epoch_callback   callback_eval);
+            ggml_opt_context_t      opt_ctx,
+            ggml_opt_dataset_t      dataset,
+            ggml_opt_result_t       result_train,   // result to increment during training, ignored if NULL
+            ggml_opt_result_t       result_eval,    // result to increment during evaluation, ignored if NULL
+            int64_t                 idata_split,    // data index at which to split training and evaluation
+            ggml_opt_epoch_callback callback_train,
+            ggml_opt_epoch_callback callback_eval);
 
     // callback that prints a progress bar on stderr
     GGML_API void ggml_opt_epoch_callback_progress_bar(
-            bool                      train,
-            struct ggml_opt_context * opt_ctx,
-            struct ggml_opt_dataset * dataset,
-            struct ggml_opt_result  * result,
-            int64_t                   ibatch,
-            int64_t                   ibatch_max,
-            int64_t                   t_start_us);
+            bool               train,
+            ggml_opt_context_t opt_ctx,
+            ggml_opt_dataset_t dataset,
+            ggml_opt_result_t  result,
+            int64_t            ibatch,
+            int64_t            ibatch_max,
+            int64_t            t_start_us);
 
     // fit model defined by inputs and outputs to dataset
     GGML_API void ggml_opt_fit(
@@ -182,7 +188,7 @@ extern "C" {
             ggml_context              * ctx_compute,      // context with temporarily allocated tensors to calculate the outputs
             ggml_tensor               * inputs,           // input tensor with shape [ne_datapoint, ndata_batch]
             ggml_tensor               * outputs,          // output tensor, must have shape [ne_label, ndata_batch] if labels are used
-            ggml_opt_dataset          * dataset,          // dataset with data and optionally also labels
+            ggml_opt_dataset_t          dataset,          // dataset with data and optionally also labels
             enum ggml_opt_loss_type     loss_type,        // loss to minimize
             ggml_opt_optimizer_params   optimizer_params, // how the optimizer should minimize the loss
             int64_t                     nepoch,           // how many times the dataset should be iterated over

@@ -29,12 +29,12 @@ struct ggml_opt_dataset {
 };
 
 struct ggml_opt_context {
-    ggml_backend_sched_t backend_sched;
-    ggml_cgraph * allocated_graph;
-    struct ggml_context * ctx_static;
-    struct ggml_context * ctx_compute;
-    ggml_backend_buffer_t buf_static;
-    std::mt19937 rng;
+    ggml_backend_sched_t    backend_sched;
+    ggml_cgraph           * allocated_graph;
+    struct ggml_context   * ctx_static;
+    struct ggml_context   * ctx_compute;
+    ggml_backend_buffer_t   buf_static;
+    std::mt19937            rng;
 
     struct ggml_tensor * inputs;
     struct ggml_tensor * outputs;
@@ -66,13 +66,13 @@ struct ggml_opt_result {
 
 // ====== Dataset ======
 
-struct ggml_opt_dataset * ggml_opt_dataset_init(int64_t ne_datapoint, int64_t ne_label, int64_t ndata, int64_t ndata_shard) {
+ggml_opt_dataset_t ggml_opt_dataset_init(int64_t ne_datapoint, int64_t ne_label, int64_t ndata, int64_t ndata_shard) {
     GGML_ASSERT(ne_datapoint >  0);
     GGML_ASSERT(ne_label     >= 0);
     GGML_ASSERT(ndata        >  0);
     GGML_ASSERT(ndata_shard  >  0);
 
-    ggml_opt_dataset * result = new ggml_opt_dataset;
+    ggml_opt_dataset_t result = new ggml_opt_dataset;
     result->ndata       = ndata;
     result->ndata_shard = ndata_shard;
 
@@ -108,22 +108,22 @@ struct ggml_opt_dataset * ggml_opt_dataset_init(int64_t ne_datapoint, int64_t ne
     return result;
 }
 
-void ggml_opt_dataset_free(struct ggml_opt_dataset * dataset) {
+void ggml_opt_dataset_free(ggml_opt_dataset_t dataset) {
     ggml_backend_buffer_free(dataset->buf);
     ggml_backend_free(dataset->backend);
     ggml_free(dataset->ctx);
     delete dataset;
 }
 
-struct ggml_tensor * ggml_opt_dataset_data(struct ggml_opt_dataset * dataset) {
+struct ggml_tensor * ggml_opt_dataset_data(ggml_opt_dataset_t dataset) {
     return dataset->data;
 }
 
-struct ggml_tensor * ggml_opt_dataset_labels(struct ggml_opt_dataset * dataset) {
+struct ggml_tensor * ggml_opt_dataset_labels(ggml_opt_dataset_t dataset) {
     return dataset->labels;
 }
 
-void ggml_opt_dataset_shuffle(struct ggml_opt_context * opt_ctx, struct ggml_opt_dataset * dataset, int64_t idata) {
+void ggml_opt_dataset_shuffle(ggml_opt_context_t opt_ctx, ggml_opt_dataset_t dataset, int64_t idata) {
     GGML_ASSERT(idata <= dataset->ndata);
 
     if (idata < 0) {
@@ -136,7 +136,7 @@ void ggml_opt_dataset_shuffle(struct ggml_opt_context * opt_ctx, struct ggml_opt
     std::shuffle(dataset->permutation.begin(), dataset->permutation.begin() + ishard_max, opt_ctx->rng);
 }
 
-void ggml_opt_dataset_get_batch(struct ggml_opt_dataset * dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch) {
+void ggml_opt_dataset_get_batch(ggml_opt_dataset_t dataset, struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, int64_t ibatch) {
     GGML_ASSERT(   data_batch && ggml_is_contiguous(data_batch));
     GGML_ASSERT(!labels_batch || ggml_is_contiguous(labels_batch));
     GGML_ASSERT((labels_batch == nullptr) == (dataset->labels == nullptr));
@@ -199,7 +199,7 @@ struct ggml_opt_params ggml_opt_default_params(
     };
 }
 
-static void ggml_opt_alloc_graph(struct ggml_opt_context * opt_ctx, ggml_cgraph * graph) {
+static void ggml_opt_alloc_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph) {
     GGML_ASSERT(graph);
     if (opt_ctx->allocated_graph == graph) {
         return;
@@ -214,8 +214,8 @@ static void ggml_opt_alloc_graph(struct ggml_opt_context * opt_ctx, ggml_cgraph 
     opt_ctx->allocated_graph = graph;
 }
 
-struct ggml_opt_context * ggml_opt_init(struct ggml_opt_params params) {
-    struct ggml_opt_context * result = new struct ggml_opt_context;
+ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
+    ggml_opt_context_t result = new struct ggml_opt_context;
     result->backend_sched   = params.backend_sched;
     result->allocated_graph = nullptr;
     result->ctx_compute     = params.ctx_compute;
@@ -364,7 +364,7 @@ struct ggml_opt_context * ggml_opt_init(struct ggml_opt_params params) {
     return result;
 }
 
-void ggml_opt_free(struct ggml_opt_context * opt_ctx) {
+void ggml_opt_free(ggml_opt_context_t opt_ctx) {
     if (opt_ctx == nullptr) {
         return;
     }
@@ -373,7 +373,7 @@ void ggml_opt_free(struct ggml_opt_context * opt_ctx) {
     delete opt_ctx;
 }
 
-void ggml_opt_reset(struct ggml_opt_context * opt_ctx, bool optimizer) {
+void ggml_opt_reset(ggml_opt_context_t opt_ctx, bool optimizer) {
     if (optimizer) {
         ggml_graph_reset(opt_ctx->gb_opt);
     } else {
@@ -381,52 +381,52 @@ void ggml_opt_reset(struct ggml_opt_context * opt_ctx, bool optimizer) {
     }
 }
 
-struct ggml_tensor * ggml_opt_inputs(struct ggml_opt_context * opt_ctx) {
+struct ggml_tensor * ggml_opt_inputs(ggml_opt_context_t opt_ctx) {
     return opt_ctx->inputs;
 }
 
-struct ggml_tensor * ggml_opt_outputs(struct ggml_opt_context * opt_ctx) {
+struct ggml_tensor * ggml_opt_outputs(ggml_opt_context_t opt_ctx) {
     return opt_ctx->outputs;
 }
 
-struct ggml_tensor * ggml_opt_labels(struct ggml_opt_context * opt_ctx) {
+struct ggml_tensor * ggml_opt_labels(ggml_opt_context_t opt_ctx) {
     return opt_ctx->labels;
 }
 
-struct ggml_tensor * ggml_opt_loss(struct ggml_opt_context * opt_ctx) {
+struct ggml_tensor * ggml_opt_loss(ggml_opt_context_t opt_ctx) {
     return opt_ctx->loss;
 }
 
-struct ggml_tensor * ggml_opt_pred(struct ggml_opt_context * opt_ctx) {
+struct ggml_tensor * ggml_opt_pred(ggml_opt_context_t opt_ctx) {
     return opt_ctx->pred;
 }
 
-struct ggml_tensor * ggml_opt_ncorrect(struct ggml_opt_context * opt_ctx) {
+struct ggml_tensor * ggml_opt_ncorrect(ggml_opt_context_t opt_ctx) {
     return opt_ctx->ncorrect;
 }
 
 // ====== Optimization Result ======
 
-struct ggml_opt_result * ggml_opt_result_init() {
+ggml_opt_result_t ggml_opt_result_init() {
     return new ggml_opt_result;
 }
 
-void ggml_opt_result_free(struct ggml_opt_result * result) {
+void ggml_opt_result_free(ggml_opt_result_t result) {
     delete result;
 }
 
-void ggml_opt_result_reset(struct ggml_opt_result * result) {
+void ggml_opt_result_reset(ggml_opt_result_t result) {
     result->ndata = 0;
     result->loss.clear();
     result->pred.clear();
     result->ncorrect = 0;
 }
 
-void ggml_opt_result_ndata(struct ggml_opt_result * result, int64_t * ndata) {
+void ggml_opt_result_ndata(ggml_opt_result_t result, int64_t * ndata) {
     *ndata = result->ndata;
 }
 
-void ggml_opt_result_loss(struct ggml_opt_result * result, double * loss, double * unc) {
+void ggml_opt_result_loss(ggml_opt_result_t result, double * loss, double * unc) {
     const int64_t nbatches = result->loss.size(); // Number of physical batches.
 
     if (nbatches == 0) {
@@ -461,13 +461,13 @@ void ggml_opt_result_loss(struct ggml_opt_result * result, double * loss, double
     *unc = result->loss_per_datapoint ? sqrt(var_sum / (nbatches - 1)) : sqrt(var_sum * nbatches/(nbatches - 1));
 }
 
-void ggml_opt_result_pred(struct ggml_opt_result * result, int32_t * pred) {
+void ggml_opt_result_pred(ggml_opt_result_t result, int32_t * pred) {
     for (size_t i = 0; i < result->pred.size(); ++i) {
         pred[i] = result->pred[i];
     }
 }
 
-void ggml_opt_result_accuracy(struct ggml_opt_result * result, double * accuracy, double * unc) {
+void ggml_opt_result_accuracy(ggml_opt_result_t result, double * accuracy, double * unc) {
     *accuracy = result->ncorrect >= 0 ? double(result->ncorrect) / double(result->ndata) : NAN;
 
     if (!unc) {
@@ -480,7 +480,7 @@ void ggml_opt_result_accuracy(struct ggml_opt_result * result, double * accuracy
 
 // ====== Computation ======
 
-static void ggml_opt_eval_graph(struct ggml_opt_context * opt_ctx, ggml_cgraph * graph, ggml_opt_result * result) {
+static void ggml_opt_eval_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph, ggml_opt_result * result) {
     ggml_opt_alloc_graph(opt_ctx, graph);
     ggml_backend_sched_graph_compute(opt_ctx->backend_sched, graph);
 
@@ -523,11 +523,11 @@ static void ggml_opt_eval_graph(struct ggml_opt_context * opt_ctx, ggml_cgraph *
     result->ncorrect += ncorrect;
 }
 
-void ggml_opt_forward(struct ggml_opt_context * opt_ctx, ggml_opt_result * result) {
+void ggml_opt_forward(ggml_opt_context_t opt_ctx, ggml_opt_result * result) {
     ggml_opt_eval_graph(opt_ctx, opt_ctx->gf, result);
 }
 
-void ggml_opt_forward_backward(struct ggml_opt_context * opt_ctx, ggml_opt_result * result) {
+void ggml_opt_forward_backward(ggml_opt_context_t opt_ctx, ggml_opt_result * result) {
     if (opt_ctx->opt_period == 1) {
         ggml_opt_eval_graph(opt_ctx, opt_ctx->gb_opt, result);
         return;
@@ -546,13 +546,13 @@ void ggml_opt_forward_backward(struct ggml_opt_context * opt_ctx, ggml_opt_resul
 // ====== High-Level Functions ======
 
 void ggml_opt_epoch(
-        struct ggml_opt_context * opt_ctx,
-        struct ggml_opt_dataset * dataset,
-        struct ggml_opt_result  * result_train,
-        struct ggml_opt_result  * result_eval,
-        int64_t                   idata_split,
-        ggml_opt_epoch_callback   callback_train,
-        ggml_opt_epoch_callback   callback_eval) {
+        ggml_opt_context_t      opt_ctx,
+        ggml_opt_dataset_t      dataset,
+        ggml_opt_result_t       result_train,
+        ggml_opt_result_t       result_eval,
+        int64_t                 idata_split,
+        ggml_opt_epoch_callback callback_train,
+        ggml_opt_epoch_callback callback_eval) {
     struct ggml_tensor * inputs = ggml_opt_inputs(opt_ctx);
     struct ggml_tensor * labels = ggml_opt_labels(opt_ctx);
     struct ggml_tensor * data   = ggml_opt_dataset_data(dataset);
@@ -588,13 +588,13 @@ void ggml_opt_epoch(
 }
 
 void ggml_opt_epoch_callback_progress_bar(
-        bool                      train,
-        struct ggml_opt_context * opt_ctx,
-        struct ggml_opt_dataset * dataset,
-        struct ggml_opt_result  * result,
-        int64_t                   ibatch,
-        int64_t                   ibatch_max,
-        int64_t                   t_start_us) {
+        bool               train,
+        ggml_opt_context_t opt_ctx,
+        ggml_opt_dataset_t dataset,
+        ggml_opt_result_t  result,
+        int64_t            ibatch,
+        int64_t            ibatch_max,
+        int64_t            t_start_us) {
     fprintf(stderr, "%s[", train ? "train: " : "val:   ");
 
     constexpr int64_t bar_length = 40;
@@ -651,7 +651,7 @@ void ggml_opt_fit(
         ggml_context              * ctx_compute,
         ggml_tensor               * inputs,
         ggml_tensor               * outputs,
-        ggml_opt_dataset          * dataset,
+        ggml_opt_dataset_t          dataset,
         enum ggml_opt_loss_type     loss_type,
         ggml_opt_optimizer_params   optimizer_params,
         int64_t                     nepoch,
@@ -677,15 +677,15 @@ void ggml_opt_fit(
     ggml_opt_params params = ggml_opt_default_params(backend_sched, ctx_compute, inputs, outputs, loss_type);
     params.optimizer_params = optimizer_params;
     params.opt_period = opt_period;
-    ggml_opt_context * opt_ctx = ggml_opt_init(params);
+    ggml_opt_context_t opt_ctx = ggml_opt_init(params);
 
     // Shuffling the data is generally useful but there is only a point if not all data is used in a single batch.
     if (nbatch_logical < ndata) {
         ggml_opt_dataset_shuffle(opt_ctx, dataset, -1); // Shuffle all data (train + validation).
     }
 
-    struct ggml_opt_result * result_train = ggml_opt_result_init();
-    struct ggml_opt_result * result_val   = ggml_opt_result_init();
+    ggml_opt_result_t result_train = ggml_opt_result_init();
+    ggml_opt_result_t result_val   = ggml_opt_result_init();
 
     ggml_opt_epoch_callback epoch_callback = silent ? nullptr : ggml_opt_epoch_callback_progress_bar;
 

@@ -25,7 +25,7 @@ int main(int argc, char ** argv) {
         exit(1);
     }
 
-    struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(MNIST_NINPUT, MNIST_NCLASSES, MNIST_NTEST, MNIST_NBATCH_PHYSICAL);
+    ggml_opt_dataset_t dataset = ggml_opt_dataset_init(MNIST_NINPUT, MNIST_NCLASSES, MNIST_NTEST, MNIST_NBATCH_PHYSICAL);
 
     if (!mnist_image_load(argv[2], dataset)) {
         return 1;
@@ -45,7 +45,7 @@ int main(int argc, char ** argv) {
     const int64_t t_load_us = ggml_time_us() - t_start_us;
     fprintf(stdout, "%s: loaded model in %.2lf ms\n", __func__, t_load_us / 1000.0);
 
-    ggml_opt_result * result_eval = mnist_model_eval(model, dataset);
+    ggml_opt_result_t result_eval = mnist_model_eval(model, dataset);
 
     std::vector<int32_t> pred(MNIST_NTEST);
     ggml_opt_result_pred(result_eval, pred.data());
