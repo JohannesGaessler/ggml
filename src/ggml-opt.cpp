@@ -597,7 +597,7 @@ void ggml_opt_epoch_callback_progress_bar(
         int64_t            t_start_us) {
     fprintf(stderr, "%s[", train ? "train: " : "val:   ");
 
-    constexpr int64_t bar_length = 40;
+    constexpr int64_t bar_length = 25;
     for (int64_t j = 0; j < bar_length; ++j) {
         const int64_t ibatch_j = ibatch_max * j/bar_length;
         if (ibatch_j < ibatch) {
