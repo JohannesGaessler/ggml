@@ -12112,6 +12112,10 @@ static void ggml_compute_forward_opt_step_adamw_f32(
     const struct ggml_tensor * src0_grad_v = dst->src[3];
     GGML_ASSERT(ggml_are_same_shape(src0, src0_grad));
 
+    GGML_ASSERT(ggml_is_scalar(dst->src[4]));
+    GGML_ASSERT(dst->src[4]->type == GGML_TYPE_I64);
+    int64_t iter = *((int64_t *) dst->src[4]->data);
+
     const int ith = params->ith;
     const int nth = params->nth;
 
@@ -12128,15 +12132,14 @@ static void ggml_compute_forward_opt_step_adamw_f32(
     const int ir1 = MIN(ir0 + dr, nr);
 
     /* const float   gnorm = 1.0f; */
-    int64_t       iter;   memcpy(&iter, &dst->op_params[0], sizeof(int64_t));
-    const float   alpha = ggml_get_op_params_f32(dst, 2);
-    const float   beta1 = ggml_get_op_params_f32(dst, 3);
-    const float   beta2 = ggml_get_op_params_f32(dst, 4);
-    const float   eps   = ggml_get_op_params_f32(dst, 5);
-    const float   wd    = ggml_get_op_params_f32(dst, 6);
+    const float alpha = ggml_get_op_params_f32(dst, 0);
+    const float beta1 = ggml_get_op_params_f32(dst, 1);
+    const float beta2 = ggml_get_op_params_f32(dst, 2);
+    const float eps   = ggml_get_op_params_f32(dst, 3);
+    const float wd    = ggml_get_op_params_f32(dst, 4);
 
-    const float beta1h  = alpha/(1.0f - powf(beta1, iter));
-    const float beta2h  =  1.0f/(1.0f - powf(beta2, iter));
+    const float beta1h = alpha/(1.0f - powf(beta1, iter));
+    const float beta2h =  1.0f/(1.0f - powf(beta2, iter));
 
     for (int ir = ir0; ir < ir1; ++ir) {
         const int64_t i03 = ir/(ne02*ne01);
@@ -12170,7 +12173,7 @@ static void ggml_compute_forward_opt_step_adamw_f32(
     }
 
     iter++;
-    memcpy(&dst->op_params[0], &iter, sizeof(int64_t));
+    *((int64_t *) dst->src[4]->data) = iter;
 }
 
 static void ggml_compute_forward_opt_step_adamw(

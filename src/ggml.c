@@ -4940,6 +4940,7 @@ struct ggml_tensor * ggml_opt_step_adamw(
         struct ggml_tensor  * grad,
         struct ggml_tensor  * m,
         struct ggml_tensor  * v,
+        struct ggml_tensor  * iter,
         float                 alpha,
         float                 beta1,
         float                 beta2,
@@ -4949,6 +4950,8 @@ struct ggml_tensor * ggml_opt_step_adamw(
     GGML_ASSERT(ggml_are_same_shape(a, grad));
     GGML_ASSERT(ggml_are_same_shape(a, m));
     GGML_ASSERT(ggml_are_same_shape(a, v));
+    GGML_ASSERT(ggml_is_scalar(iter));
+    GGML_ASSERT(iter->type == GGML_TYPE_I64);
     GGML_ASSERT(alpha >  0.0f);
     GGML_ASSERT(beta1 >= 0.0f && beta1 <= 1.0f);
     GGML_ASSERT(beta2 >= 0.0f && beta2 <= 1.0f);
@@ -4957,19 +4960,18 @@ struct ggml_tensor * ggml_opt_step_adamw(
 
     struct ggml_tensor * result = ggml_view_tensor(ctx, a);
 
-    const int64_t iter = 1;
-    memcpy(&result->op_params[0], &iter, sizeof(int64_t));
-    ggml_set_op_params_f32(result, 2, alpha);
-    ggml_set_op_params_f32(result, 3, beta1);
-    ggml_set_op_params_f32(result, 4, beta2);
-    ggml_set_op_params_f32(result, 5, eps);
-    ggml_set_op_params_f32(result, 6, wd);
+    ggml_set_op_params_f32(result, 0, alpha);
+    ggml_set_op_params_f32(result, 1, beta1);
+    ggml_set_op_params_f32(result, 2, beta2);
+    ggml_set_op_params_f32(result, 3, eps);
+    ggml_set_op_params_f32(result, 4, wd);
 
     result->op     = GGML_OP_OPT_STEP_ADAMW;
     result->src[0] = a;
     result->src[1] = grad;
     result->src[2] = m;
     result->src[3] = v;
+    result->src[4] = iter;
 
     return result;
 }
@@ -6484,13 +6486,15 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         GGML_ASSERT(node);
         if (node->op == GGML_OP_OPT_STEP_ADAMW) {
             // set iteration to 1 and clear momenta
-            int64_t iter = 1;
-            memcpy(&node->op_params[0], &iter, sizeof(int64_t));
             if (node->src[2]->data) {
                 ggml_set_zero(node->src[2]);
             }
             if (node->src[3]->data) {
                 ggml_set_zero(node->src[3]);
+            }
+            if (node->src[4]->data) {
+                const int64_t iter = 1;
+                ggml_backend_tensor_set(node->src[4], &iter, 0, ggml_nbytes(node->src[4]));
             }
         }
     }

@@ -34,8 +34,10 @@ struct ggml_opt_context {
     ggml_cgraph           * allocated_graph;
     ggml_cgraph           * allocated_graph_copy;
     struct ggml_context   * ctx_static;
+    struct ggml_context   * ctx_static_cpu;
     struct ggml_context   * ctx_compute;
     ggml_backend_buffer_t   buf_static;
+    ggml_backend_buffer_t   buf_static_cpu;
     std::mt19937            rng;
 
     struct ggml_tensor * inputs;
@@ -319,6 +321,18 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
         };
         result->ctx_static = ggml_init(params);
     }
+    {
+        // The static CPU context is used for:
+        //   - the number of optimizer iterations (1 per param)
+        const size_t tensors_per_param = result->forward_only ? 0 : 1;
+        const size_t size_meta = tensors_per_param*n_param * ggml_tensor_overhead();
+        struct ggml_init_params params = {
+            /*.mem_size   =*/ size_meta,
+            /*.mem_buffer =*/ nullptr,
+            /*.no_alloc   =*/ true,
+        };
+        result->ctx_static_cpu = ggml_init(params);
+    }
 
 
     switch (params.loss_type) {
@@ -408,16 +422,21 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
         struct ggml_tensor * node = result->gf->nodes[i];
 
         if (node->flags & GGML_TENSOR_FLAG_PARAM) {
-            struct ggml_tensor * m = ggml_dup_tensor(result->ctx_static, node);
-            struct ggml_tensor * v = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * m    = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * v    = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * iter = ggml_new_tensor_1d(result->ctx_static_cpu, GGML_TYPE_I64, 1);
             struct ggml_tensor * opt_step = ggml_opt_step_adamw(
-                result->ctx_compute, node, node->grad, m, v,
+                result->ctx_compute, node, node->grad, m, v, iter,
                 op.adamw.alpha, op.adamw.beta1, op.adamw.beta2, op.adamw.eps, op.adamw.wd);
             ggml_build_forward_expand(result->gb_opt, opt_step);
         }
     }
 
-    result->buf_static = ggml_backend_alloc_ctx_tensors(result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
+    const int icpu = ggml_backend_sched_get_n_backends(result->backend_sched) - 1;
+    result->buf_static = ggml_backend_alloc_ctx_tensors(
+        result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
+    result->buf_static_cpu = ggml_backend_alloc_ctx_tensors(
+        result->ctx_static_cpu, ggml_backend_sched_get_backend(result->backend_sched, icpu));
 
     ggml_opt_alloc_graph(result, result->gb_opt);
     ggml_graph_reset(result->gb_opt);
@@ -430,7 +449,9 @@ void ggml_opt_free(ggml_opt_context_t opt_ctx) {
         return;
     }
     ggml_backend_buffer_free(opt_ctx->buf_static);
+    ggml_backend_buffer_free(opt_ctx->buf_static_cpu);
     ggml_free(opt_ctx->ctx_static);
+    ggml_free(opt_ctx->ctx_static_cpu);
     delete opt_ctx;
 }
 

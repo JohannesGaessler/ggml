@@ -2887,7 +2887,10 @@ struct test_opt_step_adamw : public test_case {
         ggml_tensor * grad_v = ggml_new_tensor_4d(ctx, type, ne[0], ne[1], ne[2], ne[3]);
         ggml_set_name(grad_v, "grad_v");
 
-        ggml_tensor * out = ggml_opt_step_adamw(ctx, a, grad, grad_m, grad_v, alpha, beta1, beta2, eps, wd);
+        ggml_tensor * iter = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 1);
+        ggml_set_name(iter, "iter");
+
+        ggml_tensor * out = ggml_opt_step_adamw(ctx, a, grad, grad_m, grad_v, iter, alpha, beta1, beta2, eps, wd);
         ggml_set_name(out, "out");
 
         return out;

@@ -1984,6 +1984,7 @@ extern "C" {
             struct ggml_tensor  * grad,
             struct ggml_tensor  * m,
             struct ggml_tensor  * v,
+            struct ggml_tensor  * iter,
             float                 alpha,
             float                 beta1,
             float                 beta2,
