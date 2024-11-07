@@ -18,7 +18,7 @@
 // The logical batch size determines how many datapoints are used for a gradient update.
 // The physical batch size determines how many datapoints are processed in parallel, larger values utilize compute better but need more memory.
 #define MNIST_NBATCH_LOGICAL  1000
-#define MNIST_NBATCH_PHYSICAL  500
+#define MNIST_NBATCH_PHYSICAL 1000
 
 static_assert(MNIST_NBATCH_LOGICAL % MNIST_NBATCH_PHYSICAL == 0, "MNIST_NBATCH_LOGICAL % MNIST_NBATCH_PHYSICAL != 0");
 static_assert(MNIST_NTRAIN % MNIST_NBATCH_LOGICAL == 0, "MNIST_NTRAIN % MNIST_NBATCH_LOGICAL != 0");

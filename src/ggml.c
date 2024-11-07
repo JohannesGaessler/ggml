@@ -4957,7 +4957,7 @@ struct ggml_tensor * ggml_opt_step_adamw(
 
     struct ggml_tensor * result = ggml_view_tensor(ctx, a);
 
-    const int64_t iter = 100;
+    const int64_t iter = 1;
     memcpy(&result->op_params[0], &iter, sizeof(int64_t));
     ggml_set_op_params_f32(result, 2, alpha);
     ggml_set_op_params_f32(result, 3, beta1);
@@ -6484,7 +6484,8 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         GGML_ASSERT(node);
         if (node->op == GGML_OP_OPT_STEP_ADAMW) {
             // set iteration to 1 and clear momenta
-            ggml_set_op_params_i32(node, 0, 1);
+            int64_t iter = 1;
+            memcpy(&node->op_params[0], &iter, sizeof(int64_t));
             if (node->src[2]->data) {
                 ggml_set_zero(node->src[2]);
             }
