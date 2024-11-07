@@ -4957,7 +4957,7 @@ struct ggml_tensor * ggml_opt_step_adamw(
 
     struct ggml_tensor * result = ggml_view_tensor(ctx, a);
 
-    const int64_t iter = 1;
+    const int64_t iter = 100;
     memcpy(&result->op_params[0], &iter, sizeof(int64_t));
     ggml_set_op_params_f32(result, 2, alpha);
     ggml_set_op_params_f32(result, 3, beta1);
