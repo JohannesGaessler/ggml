@@ -4940,6 +4940,7 @@ struct ggml_tensor * ggml_opt_step_adamw(
         struct ggml_tensor  * grad,
         struct ggml_tensor  * m,
         struct ggml_tensor  * v,
+        const int64_t       * iter,
         float                 alpha,
         float                 beta1,
         float                 beta2,
@@ -4957,8 +4958,7 @@ struct ggml_tensor * ggml_opt_step_adamw(
 
     struct ggml_tensor * result = ggml_view_tensor(ctx, a);
 
-    const int64_t iter = 1;
-    memcpy(&result->op_params[0], &iter, sizeof(int64_t));
+    memcpy(&result->op_params[0], &iter, sizeof(iter));
     ggml_set_op_params_f32(result, 2, alpha);
     ggml_set_op_params_f32(result, 3, beta1);
     ggml_set_op_params_f32(result, 4, beta2);
@@ -6468,23 +6468,27 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         struct ggml_tensor * node = cgraph->nodes[i];
 
         // initial gradients of loss should be 1, 0 otherwise
-        if (node->grad && node->grad->data) {
+        struct ggml_tensor * grad = node->grad;
+        while (grad && !grad->data && grad->view_src) {
+            GGML_ASSERT(grad->view_offs == 0); // FIXME
+            grad = grad->view_src;
+        }
+        if (grad && grad->data) {
             if (node->flags & GGML_TENSOR_FLAG_LOSS) {
-                GGML_ASSERT(node->grad->buffer);
+                GGML_ASSERT(grad == node->grad);
+                GGML_ASSERT(grad->buffer);
                 GGML_ASSERT(node->type == GGML_TYPE_F32);
                 GGML_ASSERT(ggml_is_scalar(node));
 
                 const float onef = 1.0f;
                 ggml_backend_tensor_set(node->grad, &onef, 0, ggml_nbytes(node->grad));
             } else {
-                ggml_set_zero(node->grad);
+                ggml_set_zero(grad);
             }
         }
 
-        GGML_ASSERT(node);
         if (node->op == GGML_OP_OPT_STEP_ADAMW) {
-            // set iteration to 1 and clear momenta
-            ggml_set_op_params_i32(node, 0, 1);
+            // clear momenta
             if (node->src[2]->data) {
                 ggml_set_zero(node->src[2]);
             }

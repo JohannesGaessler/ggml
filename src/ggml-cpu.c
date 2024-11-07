@@ -12128,15 +12128,15 @@ static void ggml_compute_forward_opt_step_adamw_f32(
     const int ir1 = MIN(ir0 + dr, nr);
 
     /* const float   gnorm = 1.0f; */
-    int64_t       iter;   memcpy(&iter, &dst->op_params[0], sizeof(int64_t));
-    const float   alpha = ggml_get_op_params_f32(dst, 2);
-    const float   beta1 = ggml_get_op_params_f32(dst, 3);
-    const float   beta2 = ggml_get_op_params_f32(dst, 4);
-    const float   eps   = ggml_get_op_params_f32(dst, 5);
-    const float   wd    = ggml_get_op_params_f32(dst, 6);
+    int64_t * iter; memcpy(&iter, &dst->op_params[0], sizeof(iter));
+    const float alpha = ggml_get_op_params_f32(dst, 2);
+    const float beta1 = ggml_get_op_params_f32(dst, 3);
+    const float beta2 = ggml_get_op_params_f32(dst, 4);
+    const float eps   = ggml_get_op_params_f32(dst, 5);
+    const float wd    = ggml_get_op_params_f32(dst, 6);
 
-    const float beta1h  = alpha/(1.0f - powf(beta1, iter));
-    const float beta2h  =  1.0f/(1.0f - powf(beta2, iter));
+    const float beta1h = alpha/(1.0f - powf(beta1, *iter));
+    const float beta2h =  1.0f/(1.0f - powf(beta2, *iter));
 
     for (int ir = ir0; ir < ir1; ++ir) {
         const int64_t i03 = ir/(ne02*ne01);
@@ -12163,14 +12163,6 @@ static void ggml_compute_forward_opt_step_adamw_f32(
             w[i00] = w[i00]*(1.0f - alpha*wd) - mh/vh;
         }
     }
-
-    ggml_barrier(params->threadpool);
-    if (ith != 0) {
-        return;
-    }
-
-    iter++;
-    memcpy(&dst->op_params[0], &iter, sizeof(int64_t));
 }
 
 static void ggml_compute_forward_opt_step_adamw(

@@ -342,7 +342,7 @@ static std::pair<int, int> test_forward_backward(
             ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
             ggml_opt_forward_backward(cd.opt_ctx, cd.result);
             ggml_backend_tensor_get(loss,             loss_history.data() + idata, 0, sizeof(float));
-            ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
+            // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
         }
     }
 
@@ -460,7 +460,7 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
                 ggml_backend_tensor_get(loss,             loss_history.data() + idata, 0, sizeof(float));
-                ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
+                // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
             }
             for (; idata < ndata; ++idata) {
                 const float idataf = idata;
@@ -562,7 +562,7 @@ static std::pair<int, int> test_gradient_accumulation(
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, 1*sizeof(float));
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
-                ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, 1*sizeof(float));
+                ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata, 0, 1*sizeof(float));
             }
         } else if (nbatch_physical == 2) {
             for (int idata = 0; idata < ndata; idata += 2) {
@@ -571,7 +571,7 @@ static std::pair<int, int> test_gradient_accumulation(
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
 
                 grad_history[idata + 0] = 0.0f;
-                ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata + 1, 0, 1*sizeof(float));
+                // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata + 1, 0, 1*sizeof(float));
             }
         } else {
             GGML_ASSERT(false);

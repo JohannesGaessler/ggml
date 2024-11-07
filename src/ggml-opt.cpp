@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <inttypes.h>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -31,8 +32,10 @@ struct ggml_opt_dataset {
 struct ggml_opt_context {
     ggml_backend_sched_t    backend_sched;
     ggml_cgraph           * allocated_graph;
+    ggml_cgraph           * allocated_graph_copy;
     struct ggml_context   * ctx_static;
     struct ggml_context   * ctx_compute;
+    struct ggml_context   * ctx_copy;
     ggml_backend_buffer_t   buf_static;
     std::mt19937            rng;
 
@@ -48,6 +51,7 @@ struct ggml_opt_context {
     struct ggml_cgraph * gb_grad;
     struct ggml_cgraph * gb_opt;
 
+    int64_t iter;
     bool    forward_only;
     int32_t opt_period;
     int32_t opt_i;
@@ -199,6 +203,56 @@ struct ggml_opt_params ggml_opt_default_params(
     };
 }
 
+static ggml_tensor * map_tensor(std::map<ggml_tensor *, ggml_tensor *> & tensor_map, ggml_context * ctx, ggml_tensor * tensor) {
+    if (!tensor) {
+        return nullptr;
+    }
+
+    if (tensor_map.find(tensor) != tensor_map.end()) {
+        return tensor_map[tensor];
+    }
+
+    ggml_tensor * new_tensor = ggml_dup_tensor(ctx, tensor);
+    tensor_map[tensor] = new_tensor;
+
+    new_tensor->op = tensor->op;
+    for (int i = 0; i < GGML_MAX_DIMS; i++) {
+        new_tensor->nb[i] = tensor->nb[i];
+    }
+    new_tensor->flags = tensor->flags;
+    memcpy(new_tensor->op_params, tensor->op_params, sizeof(tensor->op_params));
+    strcpy(new_tensor->name, tensor->name);
+    new_tensor->data = tensor->data;
+    new_tensor->buffer = tensor->buffer;
+    new_tensor->extra = tensor->extra;
+    new_tensor->view_offs = tensor->view_offs;
+    new_tensor->view_src = map_tensor(tensor_map, ctx, tensor->view_src);
+    for (int i = 0; i < GGML_MAX_SRC; i++) {
+        new_tensor->src[i] = map_tensor(tensor_map, ctx, tensor->src[i]);
+    }
+
+    return new_tensor;
+}
+
+static ggml_cgraph * dup_graph(ggml_context * ctx, ggml_cgraph * graph) {
+    std::map<ggml_tensor *, ggml_tensor *> tensor_map;
+
+    ggml_cgraph * new_graph = ggml_new_graph_custom(ctx, GGML_DEFAULT_GRAPH_SIZE, /*grads =*/ true);
+
+    for (int i = 0; i < graph->n_leafs; i++) {
+        ggml_build_forward_expand(new_graph, map_tensor(tensor_map, ctx, graph->leafs[i]));
+    }
+    for (int i = 0; i < graph->n_nodes; i++) {
+        ggml_build_forward_expand(new_graph, map_tensor(tensor_map, ctx, graph->nodes[i]));
+    }
+    for (int i = 0; i < ggml_graph_n_nodes(graph); i++) {
+        struct ggml_tensor * node = ggml_graph_node(new_graph, i);
+        node->grad = map_tensor(tensor_map, ctx, node->grad);
+    }
+
+    return new_graph;
+}
+
 static void ggml_opt_alloc_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph) {
     GGML_ASSERT(graph);
     if (opt_ctx->allocated_graph == graph) {
@@ -206,24 +260,36 @@ static void ggml_opt_alloc_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph
     }
 
     ggml_backend_sched_reset(opt_ctx->backend_sched); // clear allocation of previous graph
-    for (struct ggml_tensor * t = ggml_get_first_tensor(opt_ctx->ctx_compute); t != nullptr; t = ggml_get_next_tensor(opt_ctx->ctx_compute, t)) {
-        ggml_backend_tensor_reset(t); // clear dangling pointers from tensors, making them reusable for allocation
+
+    {
+        ggml_init_params params = {
+            /*.mem_size   =*/ ggml_tensor_overhead() * GGML_DEFAULT_GRAPH_SIZE,
+            /*.mem_buffer =*/ nullptr,
+            /*.no_alloc   =*/ true,
+        };
+        ggml_free(opt_ctx->ctx_copy);
+        opt_ctx->ctx_copy = ggml_init(params);
     }
 
-    ggml_backend_sched_alloc_graph(opt_ctx->backend_sched, graph);
+    opt_ctx->allocated_graph_copy = dup_graph(opt_ctx->ctx_copy, graph);
+
+    ggml_backend_sched_alloc_graph(opt_ctx->backend_sched, opt_ctx->allocated_graph_copy);
     opt_ctx->allocated_graph = graph;
 }
 
 ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
     ggml_opt_context_t result = new struct ggml_opt_context;
-    result->backend_sched   = params.backend_sched;
-    result->allocated_graph = nullptr;
-    result->ctx_compute     = params.ctx_compute;
-    result->inputs          = params.inputs;
-    result->outputs         = params.outputs;
-    result->forward_only    = params.forward_only;
-    result->opt_period      = params.opt_period;
-    result->opt_i           = 0;
+    result->backend_sched        = params.backend_sched;
+    result->allocated_graph      = nullptr;
+    result->allocated_graph_copy = nullptr;
+    result->ctx_compute          = params.ctx_compute;
+    result->ctx_copy             = nullptr;
+    result->inputs               = params.inputs;
+    result->outputs              = params.outputs;
+    result->iter                 = 1;
+    result->forward_only         = params.forward_only;
+    result->opt_period           = params.opt_period;
+    result->opt_i                = 0;
 
     GGML_ASSERT(result->inputs->data && "the inputs must be allocated statically");
     GGML_ASSERT(result->opt_period >= 1);
@@ -347,16 +413,17 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
         struct ggml_tensor * node = result->gf->nodes[i];
 
         if (node->flags & GGML_TENSOR_FLAG_PARAM) {
-            struct ggml_tensor * m = ggml_dup_tensor(result->ctx_static, node);
-            struct ggml_tensor * v = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * m    = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * v    = ggml_dup_tensor(result->ctx_static, node);
             struct ggml_tensor * opt_step = ggml_opt_step_adamw(
-                result->ctx_compute, node, node->grad, m, v,
+                result->ctx_compute, node, node->grad, m, v, &result->iter,
                 op.adamw.alpha, op.adamw.beta1, op.adamw.beta2, op.adamw.eps, op.adamw.wd);
             ggml_build_forward_expand(result->gb_opt, opt_step);
         }
     }
 
-    result->buf_static = ggml_backend_alloc_ctx_tensors(result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
+    result->buf_static = ggml_backend_alloc_ctx_tensors(
+        result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
 
     ggml_opt_alloc_graph(result, result->gb_opt);
     ggml_graph_reset(result->gb_opt);
@@ -376,6 +443,7 @@ void ggml_opt_free(ggml_opt_context_t opt_ctx) {
 void ggml_opt_reset(ggml_opt_context_t opt_ctx, bool optimizer) {
     if (optimizer) {
         ggml_graph_reset(opt_ctx->gb_opt);
+        opt_ctx->iter = 1;
     } else {
         ggml_graph_reset(opt_ctx->gb_grad);
     }
@@ -482,7 +550,8 @@ void ggml_opt_result_accuracy(ggml_opt_result_t result, double * accuracy, doubl
 
 static void ggml_opt_eval_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph, ggml_opt_result * result) {
     ggml_opt_alloc_graph(opt_ctx, graph);
-    ggml_backend_sched_graph_compute(opt_ctx->backend_sched, graph);
+    ggml_backend_sched_graph_compute(opt_ctx->backend_sched, opt_ctx->allocated_graph_copy);
+    opt_ctx->iter += opt_ctx->allocated_graph == opt_ctx->gb_opt;
 
     if (!result) {
         return;

@@ -2859,9 +2859,10 @@ struct test_opt_step_adamw : public test_case {
     const float beta2;
     const float eps;
     const float wd;
+    const int64_t iter;
 
     std::string vars() override {
-        return VARS_TO_STR7(type, ne, alpha, beta1, beta2, eps, wd);
+        return VARS_TO_STR8(type, ne, alpha, beta1, beta2, eps, wd, iter);
     }
 
     test_opt_step_adamw(ggml_type type = GGML_TYPE_F32,
@@ -2870,8 +2871,9 @@ struct test_opt_step_adamw : public test_case {
             float beta1 = 0.9f,
             float beta2 = 0.999f,
             float eps = 1e-8f,
-            float wd = 0.0f)
-        : type(type), ne(ne), alpha(alpha), beta1(beta1), beta2(beta2), eps(eps), wd(wd) {}
+            float wd = 0.0f,
+            int64_t iter = 1)
+        : type(type), ne(ne), alpha(alpha), beta1(beta1), beta2(beta2), eps(eps), wd(wd), iter(iter) {}
 
     ggml_tensor * build_graph(ggml_context * ctx) override {
         ggml_tensor * a = ggml_new_tensor_4d(ctx, type, ne[0], ne[1], ne[2], ne[3]);
@@ -2887,7 +2889,7 @@ struct test_opt_step_adamw : public test_case {
         ggml_tensor * grad_v = ggml_new_tensor_4d(ctx, type, ne[0], ne[1], ne[2], ne[3]);
         ggml_set_name(grad_v, "grad_v");
 
-        ggml_tensor * out = ggml_opt_step_adamw(ctx, a, grad, grad_m, grad_v, alpha, beta1, beta2, eps, wd);
+        ggml_tensor * out = ggml_opt_step_adamw(ctx, a, grad, grad_m, grad_v, &iter, alpha, beta1, beta2, eps, wd);
         ggml_set_name(out, "out");
 
         return out;
