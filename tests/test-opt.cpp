@@ -562,7 +562,7 @@ static std::pair<int, int> test_gradient_accumulation(
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, 1*sizeof(float));
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
-                // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, 1*sizeof(float));
+                ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata, 0, 1*sizeof(float));
             }
         } else if (nbatch_physical == 2) {
             for (int idata = 0; idata < ndata; idata += 2) {
