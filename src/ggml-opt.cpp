@@ -539,7 +539,7 @@ void ggml_opt_result_accuracy(ggml_opt_result_t result, double * accuracy, doubl
 
 static void ggml_opt_eval_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph, ggml_opt_result * result) {
     ggml_opt_alloc_graph(opt_ctx, graph);
-    ggml_backend_sched_graph_compute(opt_ctx->backend_sched, graph);
+    ggml_backend_sched_graph_compute(opt_ctx->backend_sched, opt_ctx->allocated_graph);
 
     if (!result) {
         return;
