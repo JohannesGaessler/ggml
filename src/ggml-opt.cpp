@@ -448,10 +448,7 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
     result->buf_static = ggml_backend_alloc_ctx_tensors(
         result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
 
-    ggml_backend_t backend_cpu = ggml_backend_sched_get_backend(
-        result->backend_sched, ggml_backend_sched_get_n_backends(result->backend_sched) - 1);
-    GGML_ASSERT(ggml_backend_is_cpu(backend_cpu));
-    result->buf_static_cpu = ggml_backend_alloc_ctx_tensors(result->ctx_static_cpu, backend_cpu);
+    result->buf_static_cpu = ggml_backend_alloc_ctx_tensors_from_buft(result->ctx_static_cpu, ggml_backend_cpu_buffer_type());
 
     ggml_opt_alloc_graph(result, result->gb_opt);
     ggml_graph_reset(result->gb_opt);
