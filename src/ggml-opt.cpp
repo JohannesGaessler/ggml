@@ -34,9 +34,11 @@ struct ggml_opt_context {
     ggml_cgraph           * allocated_graph;
     ggml_cgraph           * allocated_graph_copy;
     struct ggml_context   * ctx_static;
+    struct ggml_context   * ctx_static_cpu;
     struct ggml_context   * ctx_compute;
     struct ggml_context   * ctx_copy;
     ggml_backend_buffer_t   buf_static;
+    ggml_backend_buffer_t   buf_static_cpu;
     std::mt19937            rng;
 
     struct ggml_tensor * inputs;
@@ -56,6 +58,10 @@ struct ggml_opt_context {
     int32_t opt_period;
     int32_t opt_i;
     bool    loss_per_datapoint;
+
+    ggml_opt_get_optimizer_params get_opt_pars;
+    void * get_opt_pars_ud;
+    struct ggml_tensor * adamw_params;
 };
 
 struct ggml_opt_result {
@@ -173,16 +179,18 @@ void ggml_opt_dataset_get_batch(ggml_opt_dataset_t dataset, struct ggml_tensor *
 
 // ====== Model / Context ======
 
-struct ggml_opt_optimizer_params ggml_opt_default_optimizer_params(){
-    return {
-        /*adamw =*/ {
-            /*alpha =*/ 0.001f,
-            /*beta1 =*/ 0.9f,
-            /*beta2 =*/ 0.999f,
-            /*eps   =*/ 1e-8f,
-            /*wd    =*/ 0.0f,
-        },
-    };
+struct ggml_opt_optimizer_params ggml_opt_get_default_optimizer_params(void * userdata) {
+    GGML_UNUSED(userdata);
+
+    ggml_opt_optimizer_params result;
+
+    result.adamw.alpha = 0.001f;
+    result.adamw.beta1 = 0.9f;
+    result.adamw.beta2 = 0.999f;
+    result.adamw.eps   = 1e-8f;
+    result.adamw.wd    = 0.0f;
+
+    return result;
 }
 
 struct ggml_opt_params ggml_opt_default_params(
@@ -192,14 +200,15 @@ struct ggml_opt_params ggml_opt_default_params(
         struct ggml_tensor * outputs,
         enum ggml_opt_loss_type loss_type) {
     return {
-        /*backend_sched    =*/ backend_sched,
-        /*ctx_compute      =*/ ctx_compute,
-        /*inputs           =*/ inputs,
-        /*logits           =*/ outputs,
-        /*loss_type        =*/ loss_type,
-        /*forward_only     =*/ false,
-        /*opt_period       =*/ 1,
-        /*optimizer_params =*/ ggml_opt_default_optimizer_params(),
+        /*backend_sched   =*/ backend_sched,
+        /*ctx_compute     =*/ ctx_compute,
+        /*inputs          =*/ inputs,
+        /*logits          =*/ outputs,
+        /*loss_type       =*/ loss_type,
+        /*forward_only    =*/ false,
+        /*opt_period      =*/ 1,
+        /*get_opt_pars    =*/ ggml_opt_get_default_optimizer_params,
+        /*get_opt_pars_ud =*/ nullptr,
     };
 }
 
@@ -290,6 +299,8 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
     result->forward_only         = params.forward_only;
     result->opt_period           = params.opt_period;
     result->opt_i                = 0;
+    result->get_opt_pars         = params.get_opt_pars;
+    result->get_opt_pars_ud      = params.get_opt_pars_ud;
 
     GGML_ASSERT(result->inputs->data && "the inputs must be allocated statically");
     GGML_ASSERT(result->opt_period >= 1);
@@ -323,6 +334,17 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
             /*.no_alloc   =*/ true,
         };
         result->ctx_static = ggml_init(params);
+    }
+    {
+        // The static cpu context is used for:
+        //   - optimizer parameters (1 for the entire context)
+        const size_t size_meta = 1 * ggml_tensor_overhead();
+        struct ggml_init_params params = {
+            /*.mem_size   =*/ size_meta,
+            /*.mem_buffer =*/ nullptr,
+            /*.no_alloc   =*/ true,
+        };
+        result->ctx_static_cpu = ggml_init(params);
     }
 
 
@@ -408,22 +430,28 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
     // gb_opt == graph backward optimize, forward pass, then backward pass to calculate gradients, then optimizer step.
     result->gb_opt = ggml_graph_dup(result->ctx_compute, result->gb_grad);
 
-    const ggml_opt_optimizer_params op = params.optimizer_params;
+    result->adamw_params = ggml_new_tensor_1d(result->ctx_static_cpu, GGML_TYPE_F32, 7);
+    ggml_set_input(result->adamw_params);
+    ggml_set_name(result->adamw_params, "adamw_params");
+
     for (int i = result->gf->n_nodes-1; i >= 0; --i) {
         struct ggml_tensor * node = result->gf->nodes[i];
 
         if (node->flags & GGML_TENSOR_FLAG_PARAM) {
-            struct ggml_tensor * m    = ggml_dup_tensor(result->ctx_static, node);
-            struct ggml_tensor * v    = ggml_dup_tensor(result->ctx_static, node);
-            struct ggml_tensor * opt_step = ggml_opt_step_adamw(
-                result->ctx_compute, node, node->grad, m, v, &result->iter,
-                op.adamw.alpha, op.adamw.beta1, op.adamw.beta2, op.adamw.eps, op.adamw.wd);
+            struct ggml_tensor * m        = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * v        = ggml_dup_tensor(result->ctx_static, node);
+            struct ggml_tensor * opt_step = ggml_opt_step_adamw(result->ctx_compute, node, node->grad, m, v, result->adamw_params);
             ggml_build_forward_expand(result->gb_opt, opt_step);
         }
     }
 
     result->buf_static = ggml_backend_alloc_ctx_tensors(
         result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
+
+    ggml_backend_t backend_cpu = ggml_backend_sched_get_backend(
+        result->backend_sched, ggml_backend_sched_get_n_backends(result->backend_sched) - 1);
+    GGML_ASSERT(ggml_backend_is_cpu(backend_cpu));
+    result->buf_static_cpu = ggml_backend_alloc_ctx_tensors(result->ctx_static_cpu, backend_cpu);
 
     ggml_opt_alloc_graph(result, result->gb_opt);
     ggml_graph_reset(result->gb_opt);
@@ -436,7 +464,9 @@ void ggml_opt_free(ggml_opt_context_t opt_ctx) {
         return;
     }
     ggml_backend_buffer_free(opt_ctx->buf_static);
+    ggml_backend_buffer_free(opt_ctx->buf_static_cpu);
     ggml_free(opt_ctx->ctx_static);
+    ggml_free(opt_ctx->ctx_static_cpu);
     delete opt_ctx;
 }
 
@@ -549,6 +579,32 @@ void ggml_opt_result_accuracy(ggml_opt_result_t result, double * accuracy, doubl
 // ====== Computation ======
 
 static void ggml_opt_eval_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph, ggml_opt_result * result) {
+    {
+        struct ggml_opt_optimizer_params opt_pars = opt_ctx->get_opt_pars(opt_ctx->get_opt_pars_ud);
+
+        GGML_ASSERT(opt_pars.adamw.alpha >  0.0f);
+        GGML_ASSERT(opt_pars.adamw.beta1 >= 0.0f);
+        GGML_ASSERT(opt_pars.adamw.beta1 <= 1.0f);
+        GGML_ASSERT(opt_pars.adamw.beta2 >= 0.0f);
+        GGML_ASSERT(opt_pars.adamw.beta2 <= 1.0f);
+        GGML_ASSERT(opt_pars.adamw.eps   >= 0.0f);
+        GGML_ASSERT(opt_pars.adamw.wd    >= 0.0f);
+        GGML_ASSERT(opt_pars.adamw.wd    <= 1.0f);
+
+        // beta1, beta2 after applying warmup
+        const float beta1h = 1.0f/(1.0f - powf(opt_pars.adamw.beta1, opt_ctx->iter));
+        const float beta2h = 1.0f/(1.0f - powf(opt_pars.adamw.beta2, opt_ctx->iter));
+
+        float * adamw_par_data = ggml_get_data_f32(opt_ctx->adamw_params);
+        adamw_par_data[0] = opt_pars.adamw.alpha;
+        adamw_par_data[1] = opt_pars.adamw.beta1;
+        adamw_par_data[2] = opt_pars.adamw.beta2;
+        adamw_par_data[3] = opt_pars.adamw.eps;
+        adamw_par_data[4] = opt_pars.adamw.wd;
+        adamw_par_data[5] = beta1h;
+        adamw_par_data[6] = beta2h;
+    }
+
     ggml_opt_alloc_graph(opt_ctx, graph);
     ggml_backend_sched_graph_compute(opt_ctx->backend_sched, opt_ctx->allocated_graph_copy);
     opt_ctx->iter += opt_ctx->allocated_graph == opt_ctx->gb_opt;
@@ -717,17 +773,17 @@ void ggml_opt_epoch_callback_progress_bar(
 }
 
 void ggml_opt_fit(
-        ggml_backend_sched_t        backend_sched,
-        ggml_context              * ctx_compute,
-        ggml_tensor               * inputs,
-        ggml_tensor               * outputs,
-        ggml_opt_dataset_t          dataset,
-        enum ggml_opt_loss_type     loss_type,
-        ggml_opt_optimizer_params   optimizer_params,
-        int64_t                     nepoch,
-        int64_t                     nbatch_logical,
-        float                       val_split,
-        bool                        silent) {
+        ggml_backend_sched_t            backend_sched,
+        ggml_context                  * ctx_compute,
+        ggml_tensor                   * inputs,
+        ggml_tensor                   * outputs,
+        ggml_opt_dataset_t              dataset,
+        enum ggml_opt_loss_type         loss_type,
+        ggml_opt_get_optimizer_params   get_opt_pars,
+        int64_t                         nepoch,
+        int64_t                         nbatch_logical,
+        float                           val_split,
+        bool                            silent) {
     ggml_time_init();
     const int64_t t_start_us = ggml_time_us();
 
@@ -744,9 +800,12 @@ void ggml_opt_fit(
     const int64_t ibatch_split = int64_t(((1.0f - val_split) * nbatches_logical)) * opt_period; // train <-> val split index (physical)
     const int64_t idata_split  = ibatch_split * nbatch_physical;
 
+    int64_t epoch = 1;
+
     ggml_opt_params params = ggml_opt_default_params(backend_sched, ctx_compute, inputs, outputs, loss_type);
-    params.optimizer_params = optimizer_params;
-    params.opt_period = opt_period;
+    params.opt_period      = opt_period;
+    params.get_opt_pars    = get_opt_pars;
+    params.get_opt_pars_ud = &epoch;
     ggml_opt_context_t opt_ctx = ggml_opt_init(params);
 
     // Shuffling the data is generally useful but there is only a point if not all data is used in a single batch.
@@ -759,7 +818,7 @@ void ggml_opt_fit(
 
     ggml_opt_epoch_callback epoch_callback = silent ? nullptr : ggml_opt_epoch_callback_progress_bar;
 
-    for (int64_t epoch = 1; epoch <= nepoch; ++epoch) {
+    for (; epoch <= nepoch; ++epoch) {
         if (nbatch_logical < idata_split) {
             ggml_opt_dataset_shuffle(opt_ctx, dataset, idata_split);
         }

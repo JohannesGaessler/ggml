@@ -71,7 +71,10 @@ extern "C" {
         } adamw;
     };
 
-    struct ggml_opt_optimizer_params ggml_opt_default_optimizer_params();
+    // callback to calculate optimizer parameters with arbitrary data that can be set by the user
+    typedef struct ggml_opt_optimizer_params (*ggml_opt_get_optimizer_params)(void * userdata);
+
+    GGML_API struct ggml_opt_optimizer_params ggml_opt_get_default_optimizer_params(void * userdata);
 
     // parameters for initializing a new optimization context
     struct ggml_opt_params {
@@ -89,7 +92,8 @@ extern "C" {
         bool    forward_only; // whether or not only the forward graph should be allocated (saves memory)
         int32_t opt_period;   // after how many gradient accumulation steps an optimizer step should be done
 
-        ggml_opt_optimizer_params optimizer_params;
+        ggml_opt_get_optimizer_params get_opt_pars; // callback for calculating optimizer parameters
+        void * get_opt_pars_ud;                     // userdata for calculating optimizer parameters
     };
 
     // get parameters for an optimization context with defaults set where possible
@@ -184,17 +188,17 @@ extern "C" {
 
     // fit model defined by inputs and outputs to dataset
     GGML_API void ggml_opt_fit(
-            ggml_backend_sched_t        backend_sched,    // backend scheduler for constructing the compute graphs
-            ggml_context              * ctx_compute,      // context with temporarily allocated tensors to calculate the outputs
-            ggml_tensor               * inputs,           // input tensor with shape [ne_datapoint, ndata_batch]
-            ggml_tensor               * outputs,          // output tensor, must have shape [ne_label, ndata_batch] if labels are used
-            ggml_opt_dataset_t          dataset,          // dataset with data and optionally also labels
-            enum ggml_opt_loss_type     loss_type,        // loss to minimize
-            ggml_opt_optimizer_params   optimizer_params, // how the optimizer should minimize the loss
-            int64_t                     nepoch,           // how many times the dataset should be iterated over
-            int64_t                     nbatch_logical,   // datapoints optimizer step, must be a multiple of ndata_batch in inputs/outputs
-            float                       val_split,        // fraction of the dataset to use for validation, must be in [0.0f, 1.0f)
-            bool                        silent);          // whether or not info prints to stderr should be suppressed
+            ggml_backend_sched_t            backend_sched,  // backend scheduler for constructing the compute graphs
+            ggml_context                  * ctx_compute,    // context with temporarily allocated tensors to calculate the outputs
+            ggml_tensor                   * inputs,         // input tensor with shape [ne_datapoint, ndata_batch]
+            ggml_tensor                   * outputs,        // output tensor, must have shape [ne_label, ndata_batch] if labels are used
+            ggml_opt_dataset_t              dataset,        // dataset with data and optionally also labels
+            enum ggml_opt_loss_type         loss_type,      // loss to minimize
+            ggml_opt_get_optimizer_params   get_opt_pars,   // callback to get optimizer params, userdata is pointer to epoch (of type int64_t)
+            int64_t                         nepoch,         // how many times the dataset should be iterated over
+            int64_t                         nbatch_logical, // datapoints optimizer step, must be a multiple of ndata_batch in inputs/outputs
+            float                           val_split,      // fraction of the dataset to use for validation, must be in [0.0f, 1.0f)
+            bool                            silent);        // whether or not info prints to stderr should be suppressed
 
 #ifdef  __cplusplus
 }

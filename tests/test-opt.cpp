@@ -33,6 +33,16 @@ struct helper_ctx_data {
     ggml_opt_result_t        result2;
 };
 
+// These default values make it easier to check optimization results vs. expected values.
+static ggml_opt_optimizer_params helper_get_test_opt_pars(void * userdata) {
+    ggml_opt_optimizer_params result = ggml_opt_get_default_optimizer_params(userdata);
+    result.adamw.alpha = 1.0f;
+    result.adamw.beta1 = 0.0f;
+    result.adamw.beta2 = 0.0f;
+    result.adamw.eps   = 0.0f;
+    return result;
+}
+
 static helper_ctx_data helper_get_ctx_data(
         ggml_backend_sched_t    backend_sched,
         ggml_backend_t          backend,
@@ -116,11 +126,7 @@ static helper_ctx_data helper_get_ctx_data(
     struct ggml_opt_params opt_params = ggml_opt_default_params(backend_sched, ctx_compute, inputs, outputs, loss_type);
     opt_params.opt_period = opt_period;
     if (!optimizer_defaults) {
-        // These default values make it easier to check optimization results vs. expected values.
-        opt_params.optimizer_params.adamw.alpha = 1.0f;
-        opt_params.optimizer_params.adamw.beta1 = 0.0f;
-        opt_params.optimizer_params.adamw.beta2 = 0.0f;
-        opt_params.optimizer_params.adamw.eps   = 0.0f;
+        opt_params.get_opt_pars = helper_get_test_opt_pars;
     }
     ggml_opt_context_t opt_ctx = init_opt_ctx ? ggml_opt_init(opt_params) : nullptr;
 
@@ -407,7 +413,7 @@ static std::pair<int, int> test_epoch_vs_fit(ggml_backend_sched_t backend_sched,
         ggml_opt_dataset_t dataset = cd.dataset_unsupervised;
 
         ggml_opt_fit(backend_sched, cd.ctx_compute, cd.inputs, cd.outputs, dataset,
-            GGML_OPT_LOSS_TYPE_SUM, ggml_opt_default_optimizer_params(), 1, 1, 0.0f, true);
+            GGML_OPT_LOSS_TYPE_SUM, ggml_opt_get_default_optimizer_params, 1, 1, 0.0f, true);
 
         ggml_backend_tensor_get(cd.weights, &weights_fit, 0, ggml_nbytes(cd.weights));
         helper_free_ctx_data(cd);
@@ -629,6 +635,12 @@ static std::pair<int, int> test_gradient_accumulation(
     return std::make_pair(npass, ntest);
 }
 
+static ggml_opt_optimizer_params helper_get_regression_opt_pars(void * userdata) {
+    ggml_opt_optimizer_params result = ggml_opt_get_default_optimizer_params(userdata);
+    result.adamw.alpha = 0.1f;
+    return result;
+}
+
 static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, ggml_backend_t backend) {
     int ntest = 0;
     int npass = 0;
@@ -699,10 +711,8 @@ static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, g
     ggml_backend_tensor_set(a, &a0, 0, sizeof(float));
     ggml_backend_tensor_set(b, &b0, 0, sizeof(float));
 
-    ggml_opt_optimizer_params optimizer_params = ggml_opt_default_optimizer_params();
-    optimizer_params.adamw.alpha = 0.1f;
-    ggml_opt_fit(backend_sched, ctx_compute, x, f, dataset,
-        GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR, optimizer_params, 100, ndata_regression, 0.0f, true);
+    ggml_opt_fit(backend_sched, ctx_compute, x, f, dataset, GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR,
+        helper_get_regression_opt_pars, 100, ndata_regression, 0.0f, true);
 
     {
         float a_fit;

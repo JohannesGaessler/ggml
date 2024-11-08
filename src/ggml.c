@@ -4940,36 +4940,22 @@ struct ggml_tensor * ggml_opt_step_adamw(
         struct ggml_tensor  * grad,
         struct ggml_tensor  * m,
         struct ggml_tensor  * v,
-        const int64_t       * iter,
-        float                 alpha,
-        float                 beta1,
-        float                 beta2,
-        float                 eps,
-        float                 wd) {
+        struct ggml_tensor  * adamw_params) {
     GGML_ASSERT(a->flags & GGML_TENSOR_FLAG_PARAM);
     GGML_ASSERT(ggml_are_same_shape(a, grad));
     GGML_ASSERT(ggml_are_same_shape(a, m));
     GGML_ASSERT(ggml_are_same_shape(a, v));
-    GGML_ASSERT(alpha >  0.0f);
-    GGML_ASSERT(beta1 >= 0.0f && beta1 <= 1.0f);
-    GGML_ASSERT(beta2 >= 0.0f && beta2 <= 1.0f);
-    GGML_ASSERT(eps   >= 0.0f);
-    GGML_ASSERT(wd    >= 0.0f && wd    <= 1.0f);
+    GGML_ASSERT(adamw_params->type == GGML_TYPE_F32);
+    GGML_ASSERT(ggml_nelements(adamw_params) == 7);
 
     struct ggml_tensor * result = ggml_view_tensor(ctx, a);
-
-    memcpy(&result->op_params[0], &iter, sizeof(iter));
-    ggml_set_op_params_f32(result, 2, alpha);
-    ggml_set_op_params_f32(result, 3, beta1);
-    ggml_set_op_params_f32(result, 4, beta2);
-    ggml_set_op_params_f32(result, 5, eps);
-    ggml_set_op_params_f32(result, 6, wd);
 
     result->op     = GGML_OP_OPT_STEP_ADAMW;
     result->src[0] = a;
     result->src[1] = grad;
     result->src[2] = m;
     result->src[3] = v;
+    result->src[4] = adamw_params;
 
     return result;
 }
