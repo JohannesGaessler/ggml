@@ -33,64 +33,6 @@ static_assert(MNIST_NTEST  % MNIST_NBATCH_LOGICAL == 0, "MNIST_NTRAIN % MNIST_NB
 // NCB = number of channels base
 #define MNIST_CNN_NCB 8
 
-struct mnist_dataset {
-    struct ggml_context * ctx;
-    struct ggml_tensor  * data;
-    struct ggml_tensor  * labels;
-
-    int64_t nex;
-    int64_t shard_size;
-    size_t  nbs_data;
-    size_t  nbs_labels;
-
-    std::vector<int64_t> permutation;
-    std::mt19937 rng;
-
-    mnist_dataset(const int64_t nex, const int64_t shard_size) : nex(nex), shard_size(shard_size) {
-        const size_t nbytes_images = nex*MNIST_NINPUT  *sizeof(float) + ggml_tensor_overhead();
-        const size_t nbytes_labels = nex*MNIST_NCLASSES*sizeof(float) + ggml_tensor_overhead();
-        struct ggml_init_params params = {
-            /*.mem_size   =*/ nbytes_images + nbytes_labels,
-            /*.mem_buffer =*/ nullptr,
-            /*.no_alloc   =*/ false,
-        };
-        ctx = ggml_init(params);
-
-        data   = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, MNIST_HW, MNIST_HW, nex);
-        labels = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, MNIST_NCLASSES,     nex);
-
-        nbs_data   = ggml_nbytes(data)   * shard_size/nex;
-        nbs_labels = ggml_nbytes(labels) * shard_size/nex;
-
-        permutation.resize(nex/shard_size);
-        for (size_t i = 0; i < permutation.size(); ++i) {
-            permutation[i] = i;
-        }
-    }
-
-    ~mnist_dataset() {
-        ggml_free(ctx);
-    }
-
-    void shuffle(const size_t ishard_max) {
-        if (ishard_max < permutation.size()) {
-            std::shuffle(permutation.begin(), permutation.begin() + ishard_max, rng);
-            return;
-        }
-        std::shuffle(permutation.begin(), permutation.end(), rng);
-    }
-
-    void get_batch(struct ggml_tensor * data_batch, struct ggml_tensor * labels_batch, const int64_t ibatch) {
-        const int64_t shards_per_batch = ggml_nbytes(data_batch) / nbs_data;
-        for (int64_t ishard_batch = 0; ishard_batch < shards_per_batch; ++ishard_batch) {
-            const int64_t ishard = permutation[ibatch*shards_per_batch + ishard_batch];
-
-            ggml_backend_tensor_set(data_batch,   (const char *)   data->data + ishard*nbs_data,   ishard_batch*nbs_data,   nbs_data);
-            ggml_backend_tensor_set(labels_batch, (const char *) labels->data + ishard*nbs_labels, ishard_batch*nbs_labels, nbs_labels);
-        }
-    }
-};
-
 struct mnist_model {
     std::string arch;
     ggml_backend_sched_t backend_sched;

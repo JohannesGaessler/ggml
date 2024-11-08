@@ -25,8 +25,8 @@ extern "C" {
 
     // ====== Loss ======
 
-    // built-in loss types the quantity minimized by the optimizer
-    // custom loss types can be defined via mean or sum which reduce the outputs for all datapoints to a single value
+    // built-in loss types, i.e. the built-in quantities minimized by the optimizer
+    // custom loss types can be defined via mean or sum which simply reduce the outputs for all datapoints to a single value
     enum ggml_opt_loss_type {
         GGML_OPT_LOSS_TYPE_MEAN,
         GGML_OPT_LOSS_TYPE_SUM,
@@ -71,16 +71,19 @@ extern "C" {
         } adamw;
     };
 
-    // callback to calculate optimizer parameters with arbitrary data that can be set by the user
+    // callback to calculate optimizer parameters prior to a backward pass
+    // userdata can be used to pass arbitrary data
     typedef struct ggml_opt_optimizer_params (*ggml_opt_get_optimizer_params)(void * userdata);
 
+    // returns the default optimizer params (constant)
+    // userdata is not used
     GGML_API struct ggml_opt_optimizer_params ggml_opt_get_default_optimizer_params(void * userdata);
 
     // parameters for initializing a new optimization context
     struct ggml_opt_params {
-        ggml_backend_sched_t backend_sched;
+        ggml_backend_sched_t backend_sched; // defines which backends are used to construct the compute graphs
 
-        struct ggml_context * ctx_compute;
+        struct ggml_context * ctx_compute; // created in user code, holds non-static tensors
 
         // the forward graph is defined by inputs and outputs
         // those tensors and all tensors inbetween are not intended to be reusable between multiple optimization contexts
@@ -126,10 +129,10 @@ extern "C" {
     GGML_API void ggml_opt_result_reset(ggml_opt_result_t result);
 
     // get data from result, uncertainties are optional and can be ignored by passing NULL
-    GGML_API void ggml_opt_result_ndata(   ggml_opt_result_t result, int64_t * ndata);                  // write 1 value, number of datapoints
-    GGML_API void ggml_opt_result_loss(    ggml_opt_result_t result, double  * loss,     double * unc); // write 1 value
-    GGML_API void ggml_opt_result_pred(    ggml_opt_result_t result, int32_t * pred);                   // write ndata values
-    GGML_API void ggml_opt_result_accuracy(ggml_opt_result_t result, double  * accuracy, double * unc); // write 1 value
+    GGML_API void ggml_opt_result_ndata(   ggml_opt_result_t result, int64_t * ndata);                  // writes 1 value, number of datapoints
+    GGML_API void ggml_opt_result_loss(    ggml_opt_result_t result, double  * loss,     double * unc); // writes 1 value
+    GGML_API void ggml_opt_result_pred(    ggml_opt_result_t result, int32_t * pred);                   // writes ndata values
+    GGML_API void ggml_opt_result_accuracy(ggml_opt_result_t result, double  * accuracy, double * unc); // writes 1 value
 
     // ====== Computation ======
 

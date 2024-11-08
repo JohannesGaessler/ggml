@@ -6456,7 +6456,6 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         // initial gradients of loss should be 1, 0 otherwise
         struct ggml_tensor * grad = node->grad;
         while (grad && !grad->data && grad->view_src) {
-            GGML_ASSERT(grad->view_offs == 0); // FIXME
             grad = grad->view_src;
         }
         if (grad && grad->data) {

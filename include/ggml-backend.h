@@ -77,11 +77,6 @@ extern "C" {
     GGML_API void ggml_backend_tensor_get(const struct ggml_tensor * tensor,       void * data, size_t offset, size_t size);
     GGML_API void ggml_backend_tensor_memset(   struct ggml_tensor * tensor,     uint8_t value, size_t offset, size_t size);
 
-    // by default each ggml_tensor is intended to be allocated exactly once
-    // if a tensor is allocated multiple times the pointers to its allocations need to be explicitly cleared with this function
-    // note that this does NOT free the memory for the actual allocations, that is done via e.g. ggml_backend_sched
-    GGML_API void ggml_backend_tensor_reset(struct ggml_tensor * tensor);
-
     GGML_API void ggml_backend_synchronize(ggml_backend_t backend);
 
     GGML_API ggml_backend_graph_plan_t ggml_backend_graph_plan_create(ggml_backend_t backend, struct ggml_cgraph * cgraph);
@@ -288,7 +283,7 @@ extern "C" {
 
     // Reset all assignments and allocators - must be called before changing the node backends or allocating a new graph.
     // This in effect deallocates all tensors that were previously allocated and leaves them with dangling pointers.
-    // The correct way to use this API is to either discard all deallocated tensors or to reset them via ggml_backend_tensor_reset.
+    // The correct way to use this API is to discard the deallocated tensors and create new ones.
     GGML_API void                 ggml_backend_sched_reset(ggml_backend_sched_t sched);
 
     // Set a callback to be called for each resulting node during graph compute

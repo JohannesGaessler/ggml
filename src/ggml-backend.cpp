@@ -294,14 +294,6 @@ void ggml_backend_tensor_memset(struct ggml_tensor * tensor, uint8_t value, size
     buf->iface.memset_tensor(buf, tensor, value, offset, size);
 }
 
-void ggml_backend_tensor_reset(struct ggml_tensor * tensor) {
-    // the allocation/deallocation of the memory that these pointers point to is not the responsibility of ggml_tensor
-    // they can therefore simply be cleared without creating a memory leak
-    tensor->data   = nullptr;
-    tensor->buffer = nullptr;
-    tensor->extra  = nullptr;
-}
-
 void ggml_backend_synchronize(ggml_backend_t backend) {
     if (backend->iface.synchronize == NULL) {
         return;

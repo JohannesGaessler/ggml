@@ -369,6 +369,7 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
         case GGML_OPT_LOSS_TYPE_CROSS_ENTROPY: {
             result->labels = ggml_dup_tensor(result->ctx_static, result->outputs);
             ggml_set_input(result->labels);
+            ggml_set_name(result->labels, "labels");
             result->loss = ggml_cross_entropy_loss(result->ctx_static, result->outputs, result->labels);
             ggml_set_name(result->loss, "loss_cross_entropy");
             if (result->opt_period > 1) {
@@ -381,6 +382,7 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
         case GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ERROR: {
             result->labels = ggml_dup_tensor(result->ctx_static, result->outputs);
             ggml_set_input(result->labels);
+            ggml_set_name(result->labels, "labels");
             result->loss = ggml_sub(result->ctx_static, result->outputs, result->labels);
             ggml_set_name(result->loss, "loss_error");
             result->loss = ggml_sqr(result->ctx_static, result->loss);
@@ -417,6 +419,7 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
         result->gb_opt  = nullptr;
 
         result->buf_static = ggml_backend_alloc_ctx_tensors(result->ctx_static, ggml_backend_sched_get_backend(result->backend_sched, 0));
+        result->buf_static_cpu = nullptr;
 
         ggml_opt_alloc_graph(result, result->gf);
 
@@ -576,7 +579,7 @@ void ggml_opt_result_accuracy(ggml_opt_result_t result, double * accuracy, doubl
 // ====== Computation ======
 
 static void ggml_opt_eval_graph(ggml_opt_context_t opt_ctx, ggml_cgraph * graph, ggml_opt_result * result) {
-    {
+    if (graph != opt_ctx->gf) {
         struct ggml_opt_optimizer_params opt_pars = opt_ctx->get_opt_pars(opt_ctx->get_opt_pars_ud);
 
         GGML_ASSERT(opt_pars.adamw.alpha >  0.0f);
