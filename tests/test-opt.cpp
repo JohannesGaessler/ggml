@@ -11,6 +11,10 @@
 #include <thread>
 #include <vector>
 
+static bool almost_equal(const double a, const double b, const double atol) {
+    return fabs(a - b) < atol;
+}
+
 constexpr int64_t ne_datapoint = 2;
 constexpr int64_t ne_label     = 1;
 constexpr int64_t ndata        = 6;
@@ -246,6 +250,47 @@ static std::pair<int, int> test_dataset(ggml_backend_sched_t backend_sched, ggml
     return std::make_pair(npass, ntest);
 }
 
+static std::pair<int, int> test_grad(ggml_backend_sched_t backend_sched, ggml_backend_t backend) {
+    int ntest = 0;
+    int npass = 0;
+
+    struct helper_ctx_data cd = helper_get_ctx_data(backend_sched, backend, /*init_opt_ctx =*/ true, /*optimizer_defaults =*/ false,
+    /*nbatch_logical =*/ 999999, /*nbatch_physical =*/ 1);
+
+    std::vector<float> grad_history(ndata);
+    for (int64_t idata = 0; idata < ndata; ++idata) {
+        grad_history[idata] = NAN;
+    }
+
+    for (int idata = 0; idata < ndata; ++idata) {
+        const float idataf = idata;
+        ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
+        ggml_opt_forward_backward(cd.opt_ctx, cd.result);
+        ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata, 0, sizeof(float));
+    }
+
+    {
+        bool subtest_ok = true;
+        for (int idata = 0; idata < ndata; ++idata) {
+            if (grad_history[idata] != idata + 1) {
+                subtest_ok = false;
+            }
+        }
+        printf("  %s(): ", __func__);
+        if (subtest_ok) {
+            printf("\033[1;32mOK\033[0m\n");
+            npass++;
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+        }
+        ntest++;
+    }
+
+    helper_free_ctx_data(cd);
+
+    return std::make_pair(npass, ntest);
+}
+
 static void helper_after_test_forward_backward(
         const char * func, const bool high_level, const bool shuffle,
         const std::string subtest, const bool subtest_ok, int & ntest, int & npass) {
@@ -263,10 +308,8 @@ static std::pair<int, int> test_forward_backward(
     struct ggml_tensor * loss = ggml_opt_loss(cd.opt_ctx);
 
     std::vector<float> loss_history(ndata);
-    std::vector<float> grad_history(ndata);
     for (int64_t idata = 0; idata < ndata; ++idata) {
         loss_history[idata] = NAN;
-        grad_history[idata] = NAN;
     }
 
     {
@@ -311,7 +354,7 @@ static std::pair<int, int> test_forward_backward(
         double loss;
         double loss_unc;
         ggml_opt_result_loss(cd.result, &loss, &loss_unc);
-        subtest_ok = subtest_ok && loss == 33.0 && fabs(loss_unc - sqrt(3.5)) < 1e-10;
+        subtest_ok = subtest_ok && loss == 33.0 && almost_equal(loss_unc, sqrt(3.5), 1e-10);
 
         double accuracy;
         double accuracy_unc;
@@ -333,7 +376,6 @@ static std::pair<int, int> test_forward_backward(
 
     for (int64_t idata = 0; idata < ndata; ++idata) {
         loss_history[idata] = NAN;
-        grad_history[idata] = NAN;
     }
 
     if (high_level) {
@@ -347,21 +389,10 @@ static std::pair<int, int> test_forward_backward(
             const float idataf = idata;
             ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
             ggml_opt_forward_backward(cd.opt_ctx, cd.result);
-            ggml_backend_tensor_get(loss,             loss_history.data() + idata, 0, sizeof(float));
-            // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
+            ggml_backend_tensor_get(loss, loss_history.data() + idata, 0, sizeof(float));
         }
     }
 
-    if (!high_level) {
-        bool subtest_ok = true;
-        for (float grad : grad_history) {
-            if (grad != 1.0f) {
-                subtest_ok = false;
-                break;
-            }
-        }
-        helper_after_test_forward_backward(__func__, high_level, shuffle, "grads_after_forward_backward", subtest_ok, ntest, npass);
-    }
     {
         float weights;
         ggml_backend_tensor_get(cd.weights, &weights, 0, sizeof(float));
@@ -450,10 +481,8 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
     const int idata_split = ndata * 2/3;
 
     std::vector<float> loss_history(ndata);
-    std::vector<float> grad_history(ndata);
     for (int64_t idata = 0; idata < ndata; ++idata) {
         loss_history[idata] = NAN;
-        grad_history[idata] = NAN;
     }
 
     for (int epoch = 1; epoch <= 4; ++epoch) {
@@ -465,8 +494,7 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
-                ggml_backend_tensor_get(loss,             loss_history.data() + idata, 0, sizeof(float));
-                // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata, 0, sizeof(float));
+                ggml_backend_tensor_get(loss, loss_history.data() + idata, 0, sizeof(float));
             }
             for (; idata < ndata; ++idata) {
                 const float idataf = idata;
@@ -476,16 +504,6 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
             }
         }
 
-        if (!high_level) {
-            bool subtest_ok = true;
-            for (int idata = 0; idata < idata_split; ++idata) {
-                if (grad_history[idata] != 1.0f) {
-                    subtest_ok = false;
-                    break;
-                }
-            }
-            helper_after_test_idata_split(__func__, high_level, epoch, "grads", subtest_ok, ntest, npass);
-        }
         {
             float weights;
             ggml_backend_tensor_get(cd.weights, &weights, 0, sizeof(float));
@@ -517,7 +535,7 @@ static std::pair<int, int> test_idata_split(ggml_backend_sched_t backend_sched, 
             double loss;
             double loss_unc;
             ggml_opt_result_loss(cd.result2, &loss, &loss_unc);
-            subtest_ok = subtest_ok && loss == 15.0 - epoch*8 && fabs(loss_unc - sqrt(0.5)) < 1e-10;
+            subtest_ok = subtest_ok && loss == 15.0 - epoch*8 && almost_equal(loss_unc, sqrt(0.5), 1e-10);
 
             double accuracy;
             double accuracy_unc;
@@ -554,7 +572,7 @@ static std::pair<int, int> test_gradient_accumulation(
     int npass = 0;
 
     struct helper_ctx_data cd = helper_get_ctx_data(
-        backend_sched, backend, /*init_opt_ctx =*/ true, /*optimizer_defaults =*/ false, /*nbatch_logical =*/ 2, nbatch_physical, loss_type);
+        backend_sched, backend, /*init_opt_ctx =*/ true, /*optimizer_defaults =*/ false, /*nbatch_logical =*/ 6, nbatch_physical, loss_type);
     struct ggml_tensor * loss = ggml_opt_loss(cd.opt_ctx);
 
     std::vector<float> grad_history(ndata);
@@ -577,31 +595,51 @@ static std::pair<int, int> test_gradient_accumulation(
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
 
                 grad_history[idata + 0] = 0.0f;
-                // ggml_backend_tensor_get(cd.weights->grad, grad_history.data() + idata + 1, 0, 1*sizeof(float));
+                ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata + 1, 0, 1*sizeof(float));
             }
         } else {
             GGML_ASSERT(false);
         }
 
         {
+            GGML_ASSERT(ndata == 6);
+            constexpr double atol = 1e-6;
             bool subtest_ok = true;
-            for (int idata = 0; idata < ndata; idata += 2) {
-                if (loss_type == GGML_OPT_LOSS_TYPE_SUM) {
-                    subtest_ok = subtest_ok && grad_history[idata + 0] == (nbatch_physical == 1 ? 1.0f : 0.0f);
-                    subtest_ok = subtest_ok && grad_history[idata + 1] == (nbatch_physical == 1 ? 0.0f : 2.0f);
-                } else if (loss_type == GGML_OPT_LOSS_TYPE_MEAN) {
-                    subtest_ok = subtest_ok && grad_history[idata + 0] == (nbatch_physical == 1 ? 0.5f : 0.0f);
-                    subtest_ok = subtest_ok && grad_history[idata + 1] == (nbatch_physical == 1 ? 0.0f : 1.0f);
+            if (loss_type == GGML_OPT_LOSS_TYPE_SUM) {
+                if (nbatch_physical == 1) {
+                    subtest_ok = subtest_ok && almost_equal(grad_history[0], 1.0, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[2], 3.0, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[4], 5.0, atol);
                 } else {
-                    GGML_ASSERT(false);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[0], 0.0, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[2], 0.0, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[4], 0.0, atol);
                 }
+                subtest_ok = subtest_ok && almost_equal(grad_history[1], 2.0, atol);
+                subtest_ok = subtest_ok && almost_equal(grad_history[3], 4.0, atol);
+                subtest_ok = subtest_ok && almost_equal(grad_history[5], 0.0, atol);
+            } else if (loss_type == GGML_OPT_LOSS_TYPE_MEAN) {
+                if (nbatch_physical == 1) {
+                    subtest_ok = subtest_ok && almost_equal(grad_history[0], 1.0/ndata, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[2], 3.0/ndata, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[4], 5.0/ndata, atol);
+                } else {
+                    subtest_ok = subtest_ok && almost_equal(grad_history[0], 0.0/ndata, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[2], 0.0/ndata, atol);
+                    subtest_ok = subtest_ok && almost_equal(grad_history[4], 0.0/ndata, atol);
+                }
+                subtest_ok = subtest_ok && almost_equal(grad_history[1], 2.0/ndata, atol);
+                subtest_ok = subtest_ok && almost_equal(grad_history[3], 4.0/ndata, atol);
+                subtest_ok = subtest_ok && almost_equal(grad_history[5], 0.0/ndata, atol);
+            } else {
+                GGML_ASSERT(false);
             }
             helper_after_test_gradient_accumulation(__func__, nbatch_physical, loss_type, epoch, "grads", subtest_ok, ntest, npass);
         }
         {
             float weights;
             ggml_backend_tensor_get(cd.weights, &weights, 0, sizeof(float));
-            const bool subtest_ok = weights == (1 - epoch) * (ndata/2);
+            const bool subtest_ok = weights == (ndata/2) - epoch;
             helper_after_test_gradient_accumulation(__func__, nbatch_physical, loss_type, epoch, "weights", subtest_ok, ntest, npass);
         }
         {
@@ -612,9 +650,9 @@ static std::pair<int, int> test_gradient_accumulation(
             double loss;
             ggml_opt_result_loss(cd.result, &loss, /*loss_unc =*/ nullptr);
             if (loss_type == GGML_OPT_LOSS_TYPE_SUM) {
-                subtest_ok = subtest_ok && loss == (45.0 - epoch*18.0);
+                subtest_ok = subtest_ok && loss == (39.0 - epoch*6.0);
             } else if (loss_type == GGML_OPT_LOSS_TYPE_MEAN) {
-                subtest_ok = subtest_ok && loss == (45.0 - epoch*18.0) / ndata;
+                subtest_ok = subtest_ok && almost_equal(loss, (39.0 - epoch*6.0) / ndata, 1e-6);
             } else {
                 GGML_ASSERT(false);
             }
@@ -719,7 +757,7 @@ static std::pair<int, int> test_regression(ggml_backend_sched_t backend_sched, g
         ggml_backend_tensor_get(a, &a_fit, 0, sizeof(float));
         float b_fit;
         ggml_backend_tensor_get(b, &b_fit, 0, sizeof(float));
-        const bool subtest_ok = fabsf(a_fit - a_true) < 1e-2f && fabsf(b_fit - b_true) < 1e-2f;
+        const bool subtest_ok = almost_equal(a_fit, a_true, 1e-2) && almost_equal(b_fit, b_true, 1e-2);
         printf("  %s(subtest=weights): ", __func__);
         if (subtest_ok) {
             printf("\033[1;32mOK\033[0m\n");
@@ -743,6 +781,11 @@ static std::pair<int, int> test_backend(ggml_backend_sched_t backend_sched, ggml
 
     for (bool shuffle : {false, true}) {
         std::pair<int, int> partial = test_dataset(backend_sched, backend, shuffle);
+        npass += partial.first;
+        ntest += partial.second;
+    }
+    {
+        std::pair<int, int> partial = test_grad(backend_sched, backend);
         npass += partial.first;
         ntest += partial.second;
     }
