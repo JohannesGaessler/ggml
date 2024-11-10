@@ -5109,25 +5109,45 @@ static struct ggml_tensor * ggml_sub_or_set(
     return ggml_sub_impl(ctx, a, b, false);
 }
 
-static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph * graph, int i, struct ggml_hash_set * zero_table, struct ggml_hash_set * acc_table) {
+static int ggml_find_node(struct ggml_cgraph * graph, struct ggml_tensor * node) {
+    for (int i = 0; i < graph->n_nodes; ++i) {
+        if (graph->nodes[i] == node) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void ggml_compute_backward(
+        struct ggml_context * ctx, struct ggml_cgraph * graph, int i, bool * grads_needed, struct ggml_hash_set * zero_table, struct ggml_hash_set * acc_table) {
+    if (!grads_needed[i]) {
+        return;
+    }
+
     struct ggml_tensor * tensor = graph->nodes[i];
     struct ggml_tensor * src0 = tensor->src[0];
     struct ggml_tensor * src1 = tensor->src[1];
     struct ggml_tensor * src2 = tensor->src[2];
+    const int isrc0 = ggml_find_node(graph, src0);
+    const int isrc1 = ggml_find_node(graph, src1);
+    const int isrc2 = ggml_find_node(graph, src2);
+    const bool src0_needs_grads = isrc0 >= 0 && grads_needed[isrc0];
+    const bool src1_needs_grads = isrc1 >= 0 && grads_needed[isrc1];
+    const bool src2_needs_grads = isrc2 >= 0 && grads_needed[isrc2];
 
     switch (tensor->op) {
         case GGML_OP_DUP:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                 }
             } break;
         case GGML_OP_ADD:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     if (ggml_are_same_shape(src0, src1)) {
                         src1->grad = ggml_add_or_set(ctx, src1->grad,                       tensor->grad,        zero_table, acc_table);
                     } else {
@@ -5137,10 +5157,10 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_ADD1:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     src1->grad = ggml_add_or_set(ctx,
                         src1->grad,
                         ggml_mean(ctx, tensor->grad), // TODO: should probably be sum instead of mean
@@ -5149,10 +5169,10 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_ACC:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     const size_t nb1     = ((int32_t *) tensor->op_params)[0];
                     const size_t nb2     = ((int32_t *) tensor->op_params)[1];
                     const size_t nb3     = ((int32_t *) tensor->op_params)[2];
@@ -5177,23 +5197,23 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_SUB:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     src1->grad = ggml_sub_or_set(ctx, src1->grad, tensor->grad, zero_table, acc_table);
                 }
             } break;
         case GGML_OP_MUL:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
                                 ggml_mul(ctx, src1, tensor->grad),
                                 zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     struct ggml_tensor * tmp = ggml_mul(ctx, src0, tensor->grad);
                     if (!ggml_are_same_shape(src0, src1)) {
                         tmp = ggml_repeat_back(ctx, tmp, src1);
@@ -5203,14 +5223,14 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_DIV:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
                                 ggml_div(ctx, tensor->grad, src1),
                                 zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     src1->grad =
                         ggml_sub_or_set(ctx,
                                 src1->grad,
@@ -5222,7 +5242,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_SQR:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
@@ -5234,7 +5254,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_SQRT:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
@@ -5248,7 +5268,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_LOG:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
@@ -5260,7 +5280,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_SIN:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
@@ -5272,7 +5292,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_COS:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_sub_or_set(ctx,
                                 src0->grad,
@@ -5284,7 +5304,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_SUM:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add1_or_set(ctx,
                                 src0->grad,
@@ -5294,7 +5314,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_SUM_ROWS:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx,
                                 src0->grad,
@@ -5306,7 +5326,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_MEAN:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add1_or_set(ctx,
                         src0->grad,
                         ggml_scale_impl(ctx, tensor->grad, 1.0f/src0->ne[0], false),
@@ -5321,7 +5341,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_REPEAT:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx,
                             src0->grad,
                             ggml_repeat_back(ctx, tensor->grad, src0->grad),
@@ -5330,7 +5350,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_REPEAT_BACK:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     // TODO: test this
                     src0->grad = ggml_add_or_set(ctx,
                             src0->grad,
@@ -5353,7 +5373,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_RMS_NORM:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     float eps;
                     memcpy(&eps, tensor->op_params, sizeof(float));
 
@@ -5389,7 +5409,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                 // src1.shape   [n,p,qq,rr]
 
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     struct ggml_tensor * s1_tg =
                         ggml_out_prod(ctx, // [n,m,qq,rr]
                             src1,          // [n,p,qq,rr]
@@ -5410,7 +5430,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                                 s1_tg,      // [n,m,q1,r1]
                                 zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     src1->grad =
                         ggml_add_or_set(ctx,
                                 src1->grad,                            // [n,p,qq,rr]
@@ -5440,7 +5460,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_SCALE:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     float s;
                     memcpy(&s, tensor->op_params, sizeof(float));
 
@@ -5470,7 +5490,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                         nb1, nb2, nb3, offset);
                 }
 
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx,
                         src0->grad,
                         ggml_acc_impl(ctx,
@@ -5480,7 +5500,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                         zero_table, acc_table);
                 }
 
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     src1->grad =
                         ggml_add_or_set(ctx,
                             src1->grad,
@@ -5496,18 +5516,18 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                 // cpy overwrites value of src1 by src0 and returns view(src1)
                 // the overwriting is mathematically equivalent to:
                 // tensor = src0 * 1 + src1 * 0
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     // dsrc0 = dtensor * 1
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     // dsrc1 = dtensor * 0 -> noop
                 }
             } break;
         case GGML_OP_CONT:
             {
                 // same as cpy
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     GGML_ASSERT(ggml_is_contiguous(src0->grad));
                     GGML_ASSERT(ggml_is_contiguous(tensor->grad));
                     src0->grad = ggml_add_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
@@ -5516,7 +5536,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_RESHAPE:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx, src0->grad,
                             ggml_reshape(ctx,
@@ -5530,7 +5550,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_VIEW:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     size_t offset;
 
                     memcpy(&offset, tensor->op_params, sizeof(offset));
@@ -5559,7 +5579,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_PERMUTE:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     int32_t * axes = (int32_t *) tensor->op_params;
                     int axis0 = axes[0] & 0x3;
                     int axis1 = axes[1] & 0x3;
@@ -5584,7 +5604,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_TRANSPOSE:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx, src0->grad,
                             ggml_transpose(ctx, tensor->grad),
@@ -5594,7 +5614,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_GET_ROWS:
             {
                 // necessary for llama (only for tokenizer)
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx, src0->grad,
                             // last ggml_get_rows_back argument src0->grad is only
@@ -5602,7 +5622,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                             ggml_get_rows_back(ctx, tensor->grad, src1, src0->grad),
                         zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     // noop
                 }
             } break;
@@ -5617,7 +5637,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_DIAG_MASK_INF:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     const int n_past = ((int32_t *) tensor->op_params)[0];
                     src0->grad =
                         ggml_add_or_set(ctx, src0->grad,
@@ -5630,7 +5650,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_DIAG_MASK_ZERO:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     const int n_past = ((int32_t *) tensor->op_params)[0];
                     src0->grad =
                         ggml_add_or_set(ctx, src0->grad,
@@ -5641,7 +5661,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_SOFT_MAX:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad =
                         ggml_add_or_set(ctx, src0->grad,
                             ggml_soft_max_back(ctx, tensor->grad, tensor),
@@ -5656,7 +5676,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
         case GGML_OP_ROPE:
             {
                 // necessary for llama
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     //const int n_past = ((int32_t *) tensor->op_params)[0];
                     const int n_dims     = ((int32_t *) tensor->op_params)[1];
                     const int mode       = ((int32_t *) tensor->op_params)[2];
@@ -5692,7 +5712,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             } break;
         case GGML_OP_ROPE_BACK:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     //const int n_past = ((int32_t *) tensor->op_params)[0];
                     const int n_dims     = ((int32_t *) tensor->op_params)[1];
                     const int mode       = ((int32_t *) tensor->op_params)[2];
@@ -5736,7 +5756,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             }
         case GGML_OP_IM2COL:
             {
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     const int32_t s0    = ggml_get_op_params_i32(tensor, 0);
                     const int32_t s1    = ggml_get_op_params_i32(tensor, 1);
                     const int32_t p0    = ggml_get_op_params_i32(tensor, 2);
@@ -5765,7 +5785,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             }
         case GGML_OP_POOL_2D:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     const enum ggml_op_pool op = ggml_get_op_params_i32(tensor, 0);
                     const      int32_t      k0 = ggml_get_op_params_i32(tensor, 1);
                     const      int32_t      k1 = ggml_get_op_params_i32(tensor, 2);
@@ -5837,7 +5857,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                 const size_t offs_k = offs_q + GGML_PAD(elem_q * tsize, GGML_MEM_ALIGN);
                 const size_t offs_v = offs_k + GGML_PAD(elem_k * tsize, GGML_MEM_ALIGN);
 
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     struct ggml_tensor * view_q = ggml_view_1d(ctx, flash_grad, elem_q, offs_q);
                     struct ggml_tensor * grad_q = ggml_reshape(ctx, view_q, src0);
                     src0->grad = ggml_add_or_set(ctx,
@@ -5845,7 +5865,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                             grad_q,
                             zero_table, acc_table);
                 }
-                if (src1->grad) {
+                if (src1_needs_grads) {
                     struct ggml_tensor * view_k = ggml_view_1d(ctx, flash_grad, elem_k, offs_k);
                     struct ggml_tensor * grad_k = ggml_reshape(ctx, view_k, src1);
                     src1->grad = ggml_add_or_set(ctx,
@@ -5853,7 +5873,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                             grad_k,
                             zero_table, acc_table);
                 }
-                if (src2->grad) {
+                if (src2_needs_grads) {
                     struct ggml_tensor * view_v = ggml_view_1d(ctx, flash_grad, elem_v, offs_v);
                     struct ggml_tensor * grad_v = ggml_reshape(ctx, view_v, src2);
                     src2->grad = ggml_add_or_set(ctx,
@@ -5878,7 +5898,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                 switch (ggml_get_unary_op(tensor)) {
                     case GGML_UNARY_OP_ABS:
                         {
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 src0->grad =
                                     ggml_add_or_set(ctx,
                                             src0->grad,
@@ -5890,19 +5910,19 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                         } break;
                     case GGML_UNARY_OP_SGN:
                         {
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 // noop
                             }
                         } break;
                     case GGML_UNARY_OP_NEG:
                         {
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 src0->grad = ggml_sub_or_set(ctx, src0->grad, tensor->grad, zero_table, acc_table);
                             }
                         } break;
                     case GGML_UNARY_OP_STEP:
                         {
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 // noop
                             }
                         } break;
@@ -5916,7 +5936,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                         }
                     case GGML_UNARY_OP_RELU:
                         {
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 src0->grad = ggml_add_or_set(ctx,
                                         src0->grad,
                                         ggml_mul(ctx,
@@ -5940,7 +5960,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                     case GGML_UNARY_OP_SILU:
                         {
                             // necessary for llama
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 src0->grad = ggml_add_or_set(ctx,
                                         src0->grad,
                                         ggml_silu_back(ctx, src0, tensor->grad),
@@ -5949,7 +5969,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
                         } break;
                     case GGML_UNARY_OP_EXP:
                         {
-                            if (src0->grad) {
+                            if (src0_needs_grads) {
                                 src0->grad = ggml_add_or_set(ctx,
                                         src0->grad,
                                         ggml_mul(ctx, tensor, tensor->grad),
@@ -5976,7 +5996,7 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             }
         case GGML_OP_CROSS_ENTROPY_LOSS:
             {
-                if (src0->grad) {
+                if (src0_needs_grads) {
                     src0->grad = ggml_add_or_set(ctx,
                                 src0->grad,
                                 ggml_cross_entropy_loss_back(ctx,
@@ -6005,9 +6025,9 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph 
             }
     }
 
-    for (int i = 0; i < GGML_MAX_SRC; ++i) {
-        if (tensor->src[i] && tensor->src[i]->grad) {
-            GGML_ASSERT(ggml_are_same_shape(tensor->src[i], tensor->src[i]->grad));
+    for (int j = 0; j < GGML_MAX_SRC; ++j) {
+        if (tensor->src[j] && tensor->src[j]->grad) {
+            GGML_ASSERT(ggml_are_same_shape(tensor->src[j], tensor->src[j]->grad));
         }
     }
 }
@@ -6081,16 +6101,6 @@ void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor *
     ggml_build_forward_impl(cgraph, tensor, true);
 }
 
-static struct ggml_tensor * ggml_get_grad(struct ggml_cgraph * graph, struct ggml_tensor * node) {
-    GGML_ASSERT(graph->grads);
-    for (int i = 0; i < graph->n_nodes; ++i) {
-        if (graph->nodes[i] == node) {
-            return graph->grads[i];
-        }
-    }
-    return NULL;
-}
-
 void ggml_build_backward_expand(
         struct ggml_context * ctx_static,
         struct ggml_context * ctx_compute,
@@ -6101,7 +6111,9 @@ void ggml_build_backward_expand(
     GGML_ASSERT(gf->grads);
     GGML_ASSERT(gf->grad_accs || !accumulate);
 
-    bool any_grads = false;
+    bool * grads_needed = calloc(gf->n_nodes, sizeof(bool));
+    bool any_grads_needed = false;
+
     for (int i = 0; i < gf->n_nodes; ++i) {
         struct ggml_tensor * node = gf->nodes[i];
 
@@ -6109,7 +6121,7 @@ void ggml_build_backward_expand(
             continue;
         }
 
-        bool needs_grad = node->flags & GGML_TENSOR_FLAG_PARAM;
+        bool node_needs_grad = node->flags & GGML_TENSOR_FLAG_PARAM;
         bool ignore_src[GGML_MAX_SRC] = {false};
         switch (node->op) {
             // gradients in node->src[0] for one reason or another have no effect on output gradients
@@ -6137,14 +6149,14 @@ void ggml_build_backward_expand(
                 break;
         }
         for (int j = 0; j < GGML_MAX_SRC; ++j) {
-            if (!node->src[j] || !node->src[j]->grad || ignore_src[j]) {
+            if (!node->src[j] || ignore_src[j] || !grads_needed[ggml_find_node(gf, node->src[j])]) {
                 continue;
             }
             GGML_ASSERT(node->src[j]->type == GGML_TYPE_F32 || node->src[j]->type == GGML_TYPE_F16);
-            needs_grad = true;
+            node_needs_grad = true;
             break;
         }
-        if (!needs_grad) {
+        if (!node_needs_grad) {
             continue;
         }
 
@@ -6159,9 +6171,10 @@ void ggml_build_backward_expand(
         } else {
             node->grad = ggml_dup_tensor(ctx_compute, node);
         }
-        any_grads = true;
+        grads_needed[i] = true;
+        any_grads_needed = true;
     }
-    GGML_ASSERT(any_grads && "no tensor was given gradients, did you forget to call ggml_set_param?");
+    GGML_ASSERT(any_grads_needed && "no tensor was given gradients, did you forget to call ggml_set_param?");
 
     // keep tables of original gradients for replacement/accumulation logic
     struct ggml_hash_set zero_table = ggml_hash_set_new(gf->size);
@@ -6191,7 +6204,7 @@ void ggml_build_backward_expand(
         // inplace operations to add gradients are not created by ggml_compute_backward except for gradient accumulation
         // use allocator to automatically make inplace operations
         if (node->grad) {
-            ggml_compute_backward(ctx_compute, gf, i, &zero_table, &acc_table);
+            ggml_compute_backward(ctx_compute, gf, i, grads_needed, &zero_table, &acc_table);
         }
     }
 
@@ -6206,6 +6219,7 @@ void ggml_build_backward_expand(
 
     ggml_hash_set_free(&zero_table);
     ggml_hash_set_free(&acc_table);
+    free(grads_needed);
 }
 
 static void * incr_ptr_aligned(void ** p, size_t size, size_t align) {
