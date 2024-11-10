@@ -4205,8 +4205,7 @@ struct ggml_tensor * ggml_flash_attn_ext(
     float params[] = { scale, max_bias, logit_softcap };
     ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = GGML_OP_FLASH_ATTN_EXT;
-    result->grad = is_node ? ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = GGML_OP_FLASH_ATTN_EXT;
     result->src[0] = q;
     result->src[1] = k;
     result->src[2] = v;
@@ -4267,11 +4266,12 @@ struct ggml_tensor * ggml_flash_attn_back(
 
     bool is_node = false;
 
-    if (q->grad || k->grad || v->grad) {
-        // when using this operation (in backwards pass) these grads are set.
-        // we don't want to create (big) grad of our result, so is_node is false.
-        is_node = false;
-    }
+    // FIXME disabled in grad rework
+    /* if (q->grad || k->grad || v->grad) { */
+    /*     // when using this operation (in backwards pass) these grads are set. */
+    /*     // we don't want to create (big) grad of our result, so is_node is false. */
+    /*     is_node = false; */
+    /* } */
 
     // store gradients of q, k and v as continuous tensors concatenated in result.
     // note: v and gradv are actually transposed, i.e. v->ne[0] != D.
@@ -4295,8 +4295,7 @@ struct ggml_tensor * ggml_flash_attn_back(
     int32_t masked_i = masked ? 1 : 0;
     ggml_set_op_params(result, &masked_i, sizeof(masked_i));
 
-    result->op   = GGML_OP_FLASH_ATTN_BACK;
-    result->grad = is_node ? ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = GGML_OP_FLASH_ATTN_BACK;
     result->src[0] = q;
     result->src[1] = k;
     result->src[2] = v;
@@ -5022,123 +5021,6 @@ static void ggml_hash_map_free(struct hash_map * map) {
     ggml_hash_set_free(&map->set);
     GGML_FREE(map->vals);
     GGML_FREE(map);
-}
-
-// gradient checkpointing
-
-static struct ggml_tensor * ggml_recompute_graph_node(
-        struct ggml_context * ctx,
-        struct ggml_cgraph  * graph,
-        struct hash_map     * replacements,
-        struct ggml_tensor  * node) {
-
-    if (node == NULL) {
-        return NULL;
-    }
-
-    if (node->flags & GGML_TENSOR_FLAG_PARAM) {
-        return node;
-    }
-
-    if (!ggml_hash_contains(&graph->visited_hash_set, node)) {
-        return node;
-    }
-
-    int count_children = 0;
-    for (int k = 0; k < GGML_MAX_SRC; ++k) {
-        if (node->src[k]) {
-            ++count_children;
-        }
-    }
-
-    if (count_children == 0) {
-        return node;
-    }
-
-    size_t i = ggml_hash_find(&replacements->set, node);
-    GGML_ASSERT(i != GGML_HASHSET_FULL); // assert that not full
-    if (replacements->set.keys[i] == node) {
-        return replacements->vals[i];
-    }
-
-    struct ggml_tensor * clone = ggml_new_tensor(ctx, node->type, GGML_MAX_DIMS, node->ne);
-
-    // insert clone into replacements
-    GGML_ASSERT(replacements->set.keys[i] == NULL); // assert that we don't overwrite
-    replacements->set.keys[i] = node;
-    replacements->vals[i] = clone;
-
-    clone->op       = node->op;
-    clone->grad     = node->grad;
-    clone->flags    = node->flags;
-    clone->extra    = node->extra;
-    for (int k = 0; k < GGML_MAX_DIMS; ++k) {
-        clone->nb[k] = node->nb[k];
-    }
-    for (int k = 0; k < GGML_MAX_SRC; ++k) {
-        clone->src[k] = ggml_recompute_graph_node(ctx, graph, replacements, node->src[k]);
-    }
-    if (node->view_src != NULL) {
-        clone->data = (node->view_src->data == NULL)
-                        ? NULL // view_src not yet allocated
-                        : (char *) node->view_src->data // view_src already allocated
-                                 + node->view_offs;
-        clone->view_src  = node->view_src;
-        clone->view_offs = node->view_offs;
-    }
-
-    GGML_ASSERT(sizeof(node->op_params) == sizeof(int32_t) * (GGML_MAX_OP_PARAMS / sizeof(int32_t)));
-    GGML_ASSERT(sizeof(node->name)      == GGML_MAX_NAME);
-    memcpy(clone->op_params, node->op_params, sizeof(node->op_params));
-    ggml_format_name(clone, "%s (clone)", ggml_get_name(node));
-
-    return clone;
-}
-
-void ggml_build_backward_gradient_checkpointing(
-        struct ggml_context   * ctx,
-        struct ggml_cgraph    * gf,
-        struct ggml_cgraph    * gb,
-        struct ggml_cgraph    * gb_tmp,
-        struct ggml_tensor  * * checkpoints,
-        int                     n_checkpoints) {
-    ggml_graph_cpy(gf, gb_tmp);
-    ggml_build_backward_expand(ctx, ctx, gf, gb_tmp, false);
-
-    if (n_checkpoints <= 0) {
-        ggml_graph_cpy(gb_tmp, gb);
-        return;
-    }
-
-    struct hash_map * replacements = ggml_new_hash_map(gf->n_nodes + gf->n_leafs + n_checkpoints);
-
-    // insert checkpoints in replacements
-    for (int i = 0; i < n_checkpoints; ++i) {
-        size_t k = ggml_hash_find(&replacements->set, checkpoints[i]);
-        GGML_ASSERT(k != GGML_HASHSET_FULL); // assert that not full
-        GGML_ASSERT(replacements->set.keys[k] == NULL); // assert that we don't overwrite
-        replacements->set.keys[k] = checkpoints[i];
-        replacements->vals[k]     = checkpoints[i];
-    }
-
-    ggml_graph_cpy(gf, gb);
-    // rewrite gb_tmp->nodes[gf->n_nodes:gb_tmp->n_nodes],
-    // replacing references to gb_tmp->nodes[0:gf->n_nodes] ( == gf->nodes[0:gf->n_nodes]),
-    // by recomputing them from checkpoints
-    for (int i = gf->n_nodes; i<gb_tmp->n_nodes; ++i) {
-        struct ggml_tensor * node = gb_tmp->nodes[i];
-        for (int k = 0; k < GGML_MAX_SRC; ++k) {
-            // insert new tensors recomputing src, reusing already made replacements,
-            // remember replacements: remember new tensors with mapping from corresponding gf nodes
-            // recurse for input tensors,
-            // unless (i.e. terminating when) input tensors are replacements (like checkpoints)
-            node->src[k] = ggml_recompute_graph_node(ctx, gf, replacements, node->src[k]);
-        }
-        // insert rewritten backward node with replacements made into resulting backward graph gb
-        ggml_build_forward_expand(gb, node);
-    }
-
-    ggml_hash_map_free(replacements);
 }
 
 // utility functions to change gradients
@@ -6198,6 +6080,16 @@ void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor *
     ggml_build_forward_impl(cgraph, tensor, true);
 }
 
+static struct ggml_tensor * ggml_get_grad(struct ggml_cgraph * graph, struct ggml_tensor * node) {
+    GGML_ASSERT(graph->grads);
+    for (int i = 0; i < graph->n_nodes; ++i) {
+        if (graph->nodes[i] == node) {
+            return graph->grads[i];
+        }
+    }
+    return NULL;
+}
+
 void ggml_build_backward_expand(
         struct ggml_context * ctx_static,
         struct ggml_context * ctx_compute,
@@ -6206,6 +6098,7 @@ void ggml_build_backward_expand(
         bool                  accumulate) {
     GGML_ASSERT(gf->n_nodes > 0);
     GGML_ASSERT(gf->grads);
+    GGML_ASSERT(gf->grad_accs || !accumulate);
 
     bool any_grads = false;
     for (int i = 0; i < gf->n_nodes; ++i) {
@@ -6259,9 +6152,12 @@ void ggml_build_backward_expand(
             node->op == GGML_OP_RESHAPE || node->op == GGML_OP_PERMUTE || node->op == GGML_OP_TRANSPOSE);
 
         // create a new tensor with the same type and shape as the node and set it as grad
-        node->grad = ggml_dup_tensor(
-            (accumulate && (node->flags & GGML_TENSOR_FLAG_PARAM)) || (node->flags & GGML_TENSOR_FLAG_LOSS) ?
-            ctx_static : ctx_compute, node);
+        if ((accumulate && (node->flags & GGML_TENSOR_FLAG_PARAM)) || (node->flags & GGML_TENSOR_FLAG_LOSS)) {
+            gb->grad_accs[i] = ggml_dup_tensor(ctx_static, node);
+            node->grad = gb->grad_accs[i];
+        } else {
+            node->grad = ggml_dup_tensor(ctx_compute, node);
+        }
         any_grads = true;
     }
     GGML_ASSERT(any_grads && "no tensor was given gradients, did you forget to call ggml_set_param?");
@@ -6352,10 +6248,12 @@ struct ggml_cgraph * ggml_new_graph_custom(struct ggml_context * ctx, size_t siz
 
     void * p = cgraph + 1;
 
-    struct ggml_tensor ** nodes_ptr = incr_ptr_aligned(&p, size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *));
-    struct ggml_tensor ** leafs_ptr = incr_ptr_aligned(&p, size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *));
-    struct ggml_tensor ** hash_keys_ptr = incr_ptr_aligned(&p, hash_size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *));
-    struct ggml_tensor ** grads_ptr = grads ? incr_ptr_aligned(&p, size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *)) : NULL;
+    struct ggml_tensor ** nodes_ptr     =         incr_ptr_aligned(&p, size      * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *));
+    struct ggml_tensor ** leafs_ptr     =         incr_ptr_aligned(&p, size      * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *));
+    struct ggml_tensor ** hash_keys_ptr =         incr_ptr_aligned(&p, hash_size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *));
+    struct ggml_tensor ** grads_ptr     = grads ? incr_ptr_aligned(&p, size      * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *)) : NULL;
+    struct ggml_tensor ** grad_accs_ptr = grads ? incr_ptr_aligned(&p, size      * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *)) : NULL;
+
     ggml_bitset_t * hash_used = incr_ptr_aligned(&p, ggml_bitset_size(hash_size) * sizeof(ggml_bitset_t), sizeof(ggml_bitset_t));
 
     // check that we allocated the correct amount of memory
@@ -6367,6 +6265,7 @@ struct ggml_cgraph * ggml_new_graph_custom(struct ggml_context * ctx, size_t siz
         /*.n_leafs      =*/ 0,
         /*.nodes        =*/ nodes_ptr,
         /*.grads        =*/ grads_ptr,
+        /*.grad_accs    =*/ grad_accs_ptr,
         /*.leafs        =*/ leafs_ptr,
         /*.hash_table   =*/ { hash_size, hash_used, hash_keys_ptr },
         /*.order        =*/ GGML_CGRAPH_EVAL_ORDER_LEFT_TO_RIGHT,
@@ -6388,6 +6287,7 @@ struct ggml_cgraph ggml_graph_view(struct ggml_cgraph * cgraph0, int i0, int i1)
         /*.n_leafs      =*/ 0,
         /*.nodes        =*/ cgraph0->nodes + i0,
         /*.grads        =*/ cgraph0->grads ? cgraph0->grads + i0 : NULL,
+        /*.grad_accs    =*/ cgraph0->grad_accs ? cgraph0->grad_accs + i0 : NULL,
         /*.leafs        =*/ NULL,
         /*.hash_table   =*/ { 0, NULL, NULL },
         /*.order        =*/ cgraph0->order,
@@ -6417,6 +6317,10 @@ void ggml_graph_cpy(struct ggml_cgraph * src, struct ggml_cgraph * dst) {
         GGML_ASSERT(dst->grads != NULL);
         for (int i = 0; i < src->n_nodes; ++i) {
             dst->grads[i] = src->grads[i];
+        }
+        GGML_ASSERT(dst->grad_accs != NULL);
+        for (int i = 0; i < src->n_nodes; ++i) {
+            dst->grad_accs[i] = src->grad_accs[i];
         }
     }
 

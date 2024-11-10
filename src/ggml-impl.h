@@ -272,7 +272,8 @@ struct ggml_cgraph {
     int n_leafs;
 
     struct ggml_tensor ** nodes;
-    struct ggml_tensor ** grads;
+    struct ggml_tensor ** grads;     // the outputs of these tensors are the gradients of the nodes
+    struct ggml_tensor ** grad_accs; // accumulators for node gradients
     struct ggml_tensor ** leafs;
 
     struct ggml_hash_set visited_hash_set;

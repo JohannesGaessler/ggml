@@ -2027,17 +2027,6 @@ extern "C" {
     // dump the graph into a file using the dot format
     GGML_API void ggml_graph_dump_dot(const struct ggml_cgraph * gb, const struct ggml_cgraph * gf, const char * filename);
 
-    // build gradient checkpointing backward graph gb for gf using provided checkpoints
-    // gb_tmp will contain original backward graph with rewritten backward process nodes,
-    // but without the second forward pass nodes.
-    GGML_API void ggml_build_backward_gradient_checkpointing(
-            struct ggml_context   * ctx,
-            struct ggml_cgraph    * gf,
-            struct ggml_cgraph    * gb,
-            struct ggml_cgraph    * gb_tmp,
-            struct ggml_tensor  * * checkpoints,
-            int                     n_checkpoints);
-
     // TODO these functions were sandwiched in the old optimization interface, is there a better place for them?
     typedef void (*ggml_log_callback)(enum ggml_log_level level, const char * text, void * user_data);
 
