@@ -6223,6 +6223,7 @@ static size_t ggml_graph_nbytes(size_t size, bool grads) {
     incr_ptr_aligned(&p, hash_size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *)); // hash keys
     if (grads) {
         incr_ptr_aligned(&p, size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *)); // grads
+        incr_ptr_aligned(&p, size * sizeof(struct ggml_tensor *), sizeof(struct ggml_tensor *)); // grad_accs
     }
     incr_ptr_aligned(&p, ggml_bitset_size(hash_size) * sizeof(ggml_bitset_t), sizeof(ggml_bitset_t));
 
@@ -6355,26 +6356,8 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
     GGML_ASSERT(cgraph->grads != NULL);
 
     for (int i = 0; i < cgraph->n_nodes; i++) {
-        struct ggml_tensor * node = cgraph->nodes[i];
-
-        // initial gradients of loss should be 1, 0 otherwise
-        struct ggml_tensor * grad = node->grad;
-        while (grad && !grad->data && grad->view_src) {
-            grad = grad->view_src;
-        }
-        if (grad && grad->data) {
-            if (node->flags & GGML_TENSOR_FLAG_LOSS) {
-                GGML_ASSERT(grad == node->grad);
-                GGML_ASSERT(grad->buffer);
-                GGML_ASSERT(node->type == GGML_TYPE_F32);
-                GGML_ASSERT(ggml_is_scalar(node));
-
-                const float onef = 1.0f;
-                ggml_backend_tensor_set(node->grad, &onef, 0, ggml_nbytes(node->grad));
-            } else {
-                ggml_set_zero(grad);
-            }
-        }
+        struct ggml_tensor * node     = cgraph->nodes[i];
+        struct ggml_tensor * grad_acc = cgraph->grad_accs[i];
 
         if (node->op == GGML_OP_OPT_STEP_ADAMW) {
             // clear momenta
@@ -6383,6 +6366,21 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
             }
             if (node->src[3]->data) {
                 ggml_set_zero(node->src[3]);
+            }
+        }
+
+        // initial gradients of loss should be 1, 0 otherwise
+        if (grad_acc) {
+            if (node->flags & GGML_TENSOR_FLAG_LOSS) {
+                GGML_ASSERT(grad_acc == node->grad);
+                GGML_ASSERT(grad_acc->buffer);
+                GGML_ASSERT(node->type == GGML_TYPE_F32);
+                GGML_ASSERT(ggml_is_scalar(node));
+
+                const float onef = 1.0f;
+                ggml_backend_tensor_set(node->grad, &onef, 0, ggml_nbytes(node->grad));
+            } else {
+                ggml_set_zero(grad_acc);
             }
         }
     }
