@@ -5109,7 +5109,8 @@ static struct ggml_tensor * ggml_sub_or_set(
     return ggml_sub_impl(ctx, a, b, false);
 }
 
-static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_tensor * tensor, struct ggml_hash_set * zero_table, struct ggml_hash_set * acc_table) {
+static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_cgraph * graph, int i, struct ggml_hash_set * zero_table, struct ggml_hash_set * acc_table) {
+    struct ggml_tensor * tensor = graph->nodes[i];
     struct ggml_tensor * src0 = tensor->src[0];
     struct ggml_tensor * src1 = tensor->src[1];
     struct ggml_tensor * src2 = tensor->src[2];
@@ -6190,7 +6191,7 @@ void ggml_build_backward_expand(
         // inplace operations to add gradients are not created by ggml_compute_backward except for gradient accumulation
         // use allocator to automatically make inplace operations
         if (node->grad) {
-            ggml_compute_backward(ctx_compute, node, &zero_table, &acc_table);
+            ggml_compute_backward(ctx_compute, gf, i, &zero_table, &acc_table);
         }
     }
 
