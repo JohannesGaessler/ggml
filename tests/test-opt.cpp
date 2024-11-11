@@ -266,7 +266,7 @@ static std::pair<int, int> test_grad(ggml_backend_sched_t backend_sched, ggml_ba
         const float idataf = idata;
         ggml_backend_tensor_set(cd.inputs, &idataf, 0, ggml_nbytes(cd.inputs));
         ggml_opt_forward_backward(cd.opt_ctx, cd.result);
-        ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata, 0, sizeof(float));
+        ggml_backend_tensor_get(ggml_opt_grad_acc(cd.opt_ctx, cd.weights), grad_history.data() + idata, 0, sizeof(float));
     }
 
     {
@@ -586,7 +586,7 @@ static std::pair<int, int> test_gradient_accumulation(
                 const float idataf = idata;
                 ggml_backend_tensor_set(cd.inputs, &idataf, 0, 1*sizeof(float));
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
-                ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata, 0, 1*sizeof(float));
+                ggml_backend_tensor_get(ggml_opt_grad_acc(cd.opt_ctx, cd.weights), grad_history.data() + idata, 0, 1*sizeof(float));
             }
         } else if (nbatch_physical == 2) {
             for (int idata = 0; idata < ndata; idata += 2) {
@@ -595,7 +595,7 @@ static std::pair<int, int> test_gradient_accumulation(
                 ggml_opt_forward_backward(cd.opt_ctx, cd.result);
 
                 grad_history[idata + 0] = 0.0f;
-                ggml_backend_tensor_get(cd.weights->grad->view_src, grad_history.data() + idata + 1, 0, 1*sizeof(float));
+                ggml_backend_tensor_get(ggml_opt_grad_acc(cd.opt_ctx, cd.weights), grad_history.data() + idata + 1, 0, 1*sizeof(float));
             }
         } else {
             GGML_ASSERT(false);

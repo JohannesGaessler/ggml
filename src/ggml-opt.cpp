@@ -255,8 +255,8 @@ static ggml_cgraph * dup_graph(ggml_context * ctx, ggml_cgraph * graph) {
         ggml_build_forward_expand(new_graph, map_tensor(tensor_map, ctx, graph->nodes[i]));
     }
     for (int i = 0; i < ggml_graph_n_nodes(graph); i++) {
-        struct ggml_tensor * node = ggml_graph_node(new_graph, i);
-        node->grad = map_tensor(tensor_map, ctx, node->grad);
+        new_graph->grads[i]     = map_tensor(tensor_map, ctx, graph->grads[i]);
+        new_graph->grad_accs[i] = map_tensor(tensor_map, ctx, graph->grad_accs[i]);
     }
 
     return new_graph;
@@ -438,12 +438,13 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
     ggml_set_name(result->adamw_params, "adamw_params");
 
     for (int i = result->gf->n_nodes-1; i >= 0; --i) {
-        struct ggml_tensor * node = result->gf->nodes[i];
+        struct ggml_tensor * node = result->gb_opt->nodes[i];
+        struct ggml_tensor * grad = result->gb_opt->grads[i];
 
         if (node->flags & GGML_TENSOR_FLAG_PARAM) {
             struct ggml_tensor * m        = ggml_dup_tensor(result->ctx_static, node);
             struct ggml_tensor * v        = ggml_dup_tensor(result->ctx_static, node);
-            struct ggml_tensor * opt_step = ggml_opt_step_adamw(result->ctx_compute, node, node->grad, m, v, result->adamw_params);
+            struct ggml_tensor * opt_step = ggml_opt_step_adamw(result->ctx_compute, node, grad, m, v, result->adamw_params);
             ggml_build_forward_expand(result->gb_opt, opt_step);
         }
     }
@@ -501,6 +502,10 @@ struct ggml_tensor * ggml_opt_pred(ggml_opt_context_t opt_ctx) {
 
 struct ggml_tensor * ggml_opt_ncorrect(ggml_opt_context_t opt_ctx) {
     return opt_ctx->ncorrect;
+}
+
+struct ggml_tensor * ggml_opt_grad_acc(ggml_opt_context_t opt_ctx, struct ggml_tensor * node) {
+    return ggml_graph_get_grad_acc(opt_ctx->gb_opt, node);
 }
 
 // ====== Optimization Result ======

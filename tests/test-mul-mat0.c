@@ -132,11 +132,10 @@ bool check_gradient(
             set_element(x[i], k, x0);
 
             // compute gradient using backward graph
-            ggml_graph_reset  (gf);
-            ggml_set_f32      (f->grad, 1.0f);
+            ggml_graph_reset(gb);
             ggml_graph_compute_with_ctx(ctx0, gb, n_threads);
 
-            const float g1 = get_element(x[i]->grad, k);
+            const float g1 = get_element(ggml_graph_get_grad(gb, x[i]), k);
 
             const float error_abs = fabsf(g0 - g1);
             const float error_rel = g0 != 0 ? fabsf(g0 - g1)/fabs(g0) : 0;

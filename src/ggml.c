@@ -5081,13 +5081,23 @@ static void ggml_sub_or_set(
     }
 }
 
-static int ggml_find_node(struct ggml_cgraph * graph, struct ggml_tensor * node) {
+static int ggml_find_node(const struct ggml_cgraph * graph, const struct ggml_tensor * node) {
     for (int i = 0; i < graph->n_nodes; ++i) {
         if (graph->nodes[i] == node) {
             return i;
         }
     }
     return -1;
+}
+
+struct ggml_tensor * ggml_graph_get_grad(const struct ggml_cgraph * cgraph, const struct ggml_tensor * node) {
+    const int i = ggml_find_node(cgraph, node);
+    return i >= 0 ? cgraph->grads[i] : NULL;
+}
+
+struct ggml_tensor * ggml_graph_get_grad_acc(const struct ggml_cgraph * cgraph, const struct ggml_tensor * node) {
+    const int i = ggml_find_node(cgraph, node);
+    return i >= 0 ? cgraph->grad_accs[i] : NULL;
 }
 
 static void ggml_compute_backward(
@@ -5527,29 +5537,12 @@ static void ggml_compute_backward(
         } break;
     }
 
-    if (src0_needs_grads) {
-        GGML_ASSERT(ggml_are_same_shape(graph->nodes[isrc0], graph->grads[isrc0]));
-        src0->grad = graph->grads[isrc0];
-    }
-    if (src1_needs_grads) {
-        GGML_ASSERT(ggml_are_same_shape(graph->nodes[isrc1], graph->grads[isrc1]));
-        src1->grad = graph->grads[isrc1];
-    }
-    if (src2_needs_grads) {
-        GGML_ASSERT(ggml_are_same_shape(graph->nodes[isrc2], graph->grads[isrc2]));
-        src2->grad = graph->grads[isrc2];
-    }
+    GGML_ASSERT(!src0_needs_grads || ggml_are_same_shape(graph->nodes[isrc0], graph->grads[isrc0]));
+    GGML_ASSERT(!src1_needs_grads || ggml_are_same_shape(graph->nodes[isrc1], graph->grads[isrc1]));
+    GGML_ASSERT(!src2_needs_grads || ggml_are_same_shape(graph->nodes[isrc2], graph->grads[isrc2]));
 }
 
 static void ggml_visit_parents(struct ggml_cgraph * cgraph, struct ggml_tensor * node) {
-    if (node->grad == NULL) {
-        // this usually happens when we generate intermediate nodes from constants in the backward pass
-        // it can also happen during forward pass, if the user performs computations with constants
-        if (node->op != GGML_OP_NONE) {
-            //GGML_PRINT_DEBUG("%s: warning: node %p has no grad, but op %d\n", __func__, (void *) node, node->op);
-        }
-    }
-
     // check if already visited
     if (ggml_hash_insert(&cgraph->visited_hash_set, node) == GGML_HASHSET_ALREADY_EXISTS) {
         return;
@@ -5695,7 +5688,6 @@ void ggml_build_backward_expand(
         if (node->flags & GGML_TENSOR_FLAG_LOSS) {
             cgraph->grads[i] = ggml_dup_tensor(ctx_static, node);
             cgraph->grad_accs[i] = cgraph->grads[i];
-            cgraph->nodes[i]->grad = cgraph->grads[i];
         }
         grads_needed[i] = true;
     }
@@ -5884,9 +5876,8 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         // initial gradients of loss should be 1, 0 otherwise
         if (grad_acc) {
             if (node->flags & GGML_TENSOR_FLAG_LOSS) {
-                GGML_ASSERT(grad_acc == node->grad);
-                GGML_ASSERT(node->type == GGML_TYPE_F32);
-                GGML_ASSERT(ggml_is_scalar(node));
+                GGML_ASSERT(grad_acc->type == GGML_TYPE_F32);
+                GGML_ASSERT(ggml_is_scalar(grad_acc));
 
                 const float onef = 1.0f;
                 if (grad_acc->buffer) {
@@ -5966,7 +5957,8 @@ void ggml_graph_print(const struct ggml_cgraph * cgraph) {
         GGML_LOG_INFO(" - %3d: [ %5" PRId64 ", %5" PRId64 ", %5" PRId64 "] %16s %s\n",
                 i,
                 node->ne[0], node->ne[1], node->ne[2],
-                ggml_op_name(node->op), (node->flags & GGML_TENSOR_FLAG_PARAM) ? "x" : node->grad ? "g" : " ");
+                ggml_op_name(node->op), (node->flags & GGML_TENSOR_FLAG_PARAM) ? "x" :
+                      ggml_graph_get_grad(cgraph, node) ? "g" : " ");
     }
 
     GGML_LOG_INFO("n_leafs = %d\n", cgraph->n_leafs);
@@ -6001,8 +5993,9 @@ static bool ggml_graph_find(const struct ggml_cgraph * cgraph, const struct ggml
 static struct ggml_tensor * ggml_graph_get_parent(const struct ggml_cgraph * cgraph, const struct ggml_tensor * node) {
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct ggml_tensor * parent = cgraph->nodes[i];
+        struct ggml_tensor * grad = ggml_graph_get_grad(cgraph, parent);
 
-        if (parent->grad == node) {
+        if (grad == node) {
             return parent;
         }
     }
@@ -6042,6 +6035,7 @@ void ggml_graph_dump_dot(const struct ggml_cgraph * gb, const struct ggml_cgraph
 
     for (int i = 0; i < gb->n_nodes; i++) {
         struct ggml_tensor * node = gb->nodes[i];
+        struct ggml_tensor * grad = ggml_graph_get_grad(gb, node);
 
         if (ggml_graph_get_parent(gb, node) != NULL) {
             continue;
@@ -6049,7 +6043,7 @@ void ggml_graph_dump_dot(const struct ggml_cgraph * gb, const struct ggml_cgraph
 
         if (node->flags & GGML_TENSOR_FLAG_PARAM) {
             snprintf(color, sizeof(color), "yellow");
-        } else if (node->grad) {
+        } else if (grad) {
             if (ggml_graph_find(gf, node)) {
                 snprintf(color, sizeof(color), "green");
             } else {
@@ -6076,8 +6070,8 @@ void ggml_graph_dump_dot(const struct ggml_cgraph * gb, const struct ggml_cgraph
             fprintf(fp, "%d [%" PRId64 ", %" PRId64 ", %" PRId64 "] | <x>%s", i, node->ne[0], node->ne[1], node->ne[2], ggml_op_symbol(node->op));
         }
 
-        if (node->grad) {
-            fprintf(fp, " | <g>%s\"; ]\n", ggml_op_symbol(node->grad->op));
+        if (grad) {
+            fprintf(fp, " | <g>%s\"; ]\n", ggml_op_symbol(grad->op));
         } else {
             fprintf(fp, "\"; ]\n");
         }

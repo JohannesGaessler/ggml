@@ -813,7 +813,7 @@ struct test_case {
         if (expect.size() != 1 || expect[0] != 0.0f) {
             GGML_ASSERT(ggml_graph_n_nodes(gb) > ggml_graph_n_nodes(gf));
             for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != NULL; t = ggml_get_next_tensor(ctx, t)) {
-                GGML_ASSERT(!(t->flags & GGML_TENSOR_FLAG_PARAM) || t->grad->op != GGML_OP_NONE);
+                GGML_ASSERT(!(t->flags & GGML_TENSOR_FLAG_PARAM) || ggml_graph_get_grad(gb, t)->op != GGML_OP_NONE);
             }
         }
 
@@ -861,8 +861,9 @@ struct test_case {
             const int64_t ne = ggml_nelements(t);
 
             std::vector<float> ga;
-            if (t->grad) {
-                ga = tensor_to_float(t->grad);
+            struct ggml_tensor * grad = ggml_graph_get_grad(gb, t);
+            if (grad) {
+                ga = tensor_to_float(grad);
             } else {
                 ga.resize(ne); // default value is 0.0f
             }

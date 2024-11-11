@@ -122,6 +122,8 @@ extern "C" {
     GGML_API struct ggml_tensor * ggml_opt_pred(    ggml_opt_context_t opt_ctx); // predictions made by outputs
     GGML_API struct ggml_tensor * ggml_opt_ncorrect(ggml_opt_context_t opt_ctx); // number of matching predictions between outputs and labels
 
+    GGML_API struct ggml_tensor * ggml_opt_grad_acc(ggml_opt_context_t opt_ctx, struct ggml_tensor * node);
+
     // ====== Optimization Result ======
 
     GGML_API ggml_opt_result_t ggml_opt_result_init();
