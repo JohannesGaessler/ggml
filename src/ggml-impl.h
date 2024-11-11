@@ -267,14 +267,14 @@ enum ggml_cgraph_eval_order {
 };
 
 struct ggml_cgraph {
-    int size;
-    int n_nodes;
-    int n_leafs;
+    int size;    // maximum number of nodes/leafs/grads/grad_accs
+    int n_nodes; // number of nodes currently in use
+    int n_leafs; // number of leafs currently in use
 
-    struct ggml_tensor ** nodes;
+    struct ggml_tensor ** nodes;     // tensors with data that can change if the graph is evaluated
     struct ggml_tensor ** grads;     // the outputs of these tensors are the gradients of the nodes
     struct ggml_tensor ** grad_accs; // accumulators for node gradients
-    struct ggml_tensor ** leafs;
+    struct ggml_tensor ** leafs;     // tensors with constant data
 
     struct ggml_hash_set visited_hash_set;
 

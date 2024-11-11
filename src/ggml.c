@@ -5303,8 +5303,8 @@ static void ggml_compute_backward(
 
             if (src0_needs_grads || src1_needs_grads) {
                 GGML_ASSERT(src0->type == tensor->type);
-                GGML_ASSERT(graph->grads[isrc0]->type == grad->type);
-                GGML_ASSERT(!src1_needs_grads || graph->grads[isrc1]->type == grad->type);
+                GGML_ASSERT(!graph->grads[isrc0] ||                      graph->grads[isrc0]->type == grad->type);
+                GGML_ASSERT(!graph->grads[isrc1] || !src1_needs_grads || graph->grads[isrc1]->type == grad->type);
 
                 tensor_grad_view = ggml_view_4d(ctx,
                     grad, src1->ne[0], src1->ne[1], src1->ne[2], src1->ne[3],
@@ -5317,7 +5317,7 @@ static void ggml_compute_backward(
             }
 
             if (src1_needs_grads) {
-                ggml_add_or_set(ctx, graph, isrc1, ggml_reshape(ctx, ggml_cont(ctx, tensor_grad_view), graph->grads[isrc1]));
+                ggml_add_or_set(ctx, graph, isrc1, ggml_reshape(ctx, ggml_cont(ctx, tensor_grad_view), src1));
             }
         } break;
         case GGML_OP_CPY: {
@@ -5335,7 +5335,7 @@ static void ggml_compute_backward(
         case GGML_OP_CONT: {
             // same as cpy
             if (src0_needs_grads) {
-                GGML_ASSERT(ggml_is_contiguous(graph->grads[isrc0]));
+                GGML_ASSERT(!graph->grads[isrc0] || ggml_is_contiguous(graph->grads[isrc0]));
                 GGML_ASSERT(ggml_is_contiguous(grad));
                 ggml_add_or_set(ctx, graph, isrc0, grad);
             }
@@ -5356,7 +5356,7 @@ static void ggml_compute_backward(
                 size_t nb2 = tensor->nb[2];
                 size_t nb3 = tensor->nb[3];
 
-                if (src0->type != graph->grads[isrc0]->type) {
+                if (graph->grads[isrc0] && src0->type != graph->grads[isrc0]->type) {
                     // gradient is typically F32, but src0 could be other type
                     size_t ng = ggml_element_size(graph->grads[isrc0]);
                     size_t n0 = ggml_element_size(src0);
@@ -5616,17 +5616,20 @@ void ggml_build_backward_expand(
         struct ggml_cgraph  * gf,
         struct ggml_cgraph  * gb,
         bool                  accumulate) {
-    GGML_ASSERT(gf->n_nodes > 0);
-    GGML_ASSERT(gf->grads);
-    GGML_ASSERT(gf->grad_accs || !accumulate);
+    GGML_ASSERT(gf == gb);
+    GGML_ASSERT(gb->n_nodes > 0);
+    GGML_ASSERT(gb->grads);
+    GGML_ASSERT(gb->grad_accs || !accumulate);
 
-    memset(gb->grads,     0, gb->n_nodes*sizeof(struct ggml_tensor *));
-    memset(gb->grad_accs, 0, gb->n_nodes*sizeof(struct ggml_tensor *));
-    bool * grads_needed = calloc(gf->n_nodes, sizeof(bool));
+    const int n_nodes_f = gb->n_nodes;
+
+    memset(gb->grads,     0, gb->size*sizeof(struct ggml_tensor *));
+    memset(gb->grad_accs, 0, gb->size*sizeof(struct ggml_tensor *));
+    bool * grads_needed = calloc(n_nodes_f, sizeof(bool));
     bool any_grads_needed = false;
 
-    for (int i = 0; i < gf->n_nodes; ++i) {
-        struct ggml_tensor * node = gf->nodes[i];
+    for (int i = 0; i < n_nodes_f; ++i) {
+        struct ggml_tensor * node = gb->nodes[i];
 
         if (node->type == GGML_TYPE_I32) {
             continue;
@@ -5660,7 +5663,7 @@ void ggml_build_backward_expand(
                 break;
         }
         for (int j = 0; j < GGML_MAX_SRC; ++j) {
-            if (!node->src[j] || ignore_src[j] || !grads_needed[ggml_find_node(gf, node->src[j])]) {
+            if (!node->src[j] || ignore_src[j] || !grads_needed[ggml_find_node(gb, node->src[j])]) {
                 continue;
             }
             GGML_ASSERT(node->src[j]->type == GGML_TYPE_F32 || node->src[j]->type == GGML_TYPE_F16);
@@ -5690,13 +5693,13 @@ void ggml_build_backward_expand(
     }
     GGML_ASSERT(any_grads_needed && "no tensor was given gradients, did you forget to call ggml_set_param?");
 
-    for (int i = gb->n_nodes - 1; i >= 0; i--) {
+    for (int i = n_nodes_f - 1; i >= 0; i--) {
         // inplace operations to add gradients are not created by ggml_compute_backward except for gradient accumulation
         // use allocator to automatically make inplace operations
         ggml_compute_backward(ctx_compute, gb, i, grads_needed);
     }
 
-    for (int i = 0; i < gf->n_nodes; i++) {
+    for (int i = 0; i < n_nodes_f; i++) {
         struct ggml_tensor * node = gb->nodes[i];
         struct ggml_tensor * grad = gb->grads[i];
 
