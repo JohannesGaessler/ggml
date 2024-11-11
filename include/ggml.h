@@ -602,7 +602,6 @@ extern "C" {
 
         int32_t flags;
 
-        struct ggml_tensor * grad;
         struct ggml_tensor * src[GGML_MAX_SRC];
 
         // source tensor and offset for views
@@ -615,7 +614,7 @@ extern "C" {
 
         void * extra; // extra things e.g. for ggml-cuda.cu
 
-        // char padding[4];
+        char padding[8];
     };
 
     static const size_t GGML_TENSOR_SIZE = sizeof(struct ggml_tensor);
