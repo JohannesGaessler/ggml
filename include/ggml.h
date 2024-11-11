@@ -1992,10 +1992,9 @@ extern "C" {
 
     GGML_API void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor * tensor);
     GGML_API void ggml_build_backward_expand(
-        struct ggml_context * ctx_static,  // context for gradient accumulation
+        struct ggml_context * ctx_static,  // context for static gradients (loss + gradient accumulation)
         struct ggml_context * ctx_compute, // context for gradient computation
-        struct ggml_cgraph  * gf,
-        struct ggml_cgraph  * gb,
+        struct ggml_cgraph  * cgraph,
         bool                  accumulate); // whether or not gradients should be accumulated, requires static allocation of tensors in ctx_static
 
     // graph allocation in a context

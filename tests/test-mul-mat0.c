@@ -97,15 +97,15 @@ bool check_gradient(
         float max_error_abs,
         float max_error_rel) {
     const int n_threads = 1;
+    ggml_set_loss(f);
 
     struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, GGML_DEFAULT_GRAPH_SIZE, true);
     ggml_build_forward_expand(gf, f);
     struct ggml_cgraph * gb = ggml_graph_dup(ctx0, gf);
-    ggml_build_backward_expand(ctx0, ctx0, gf, gb, false);
+    ggml_build_backward_expand(ctx0, ctx0, gb, false);
 
     ggml_graph_compute_with_ctx(ctx0, gf, n_threads);
-    ggml_graph_reset  (gf);
-    ggml_set_f32      (f->grad, 1.0f);
+    ggml_graph_reset(gb);
     ggml_graph_compute_with_ctx(ctx0, gb, n_threads);
 
     ggml_graph_dump_dot(gf, NULL, "test-grad0-forward.dot");

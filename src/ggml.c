@@ -5613,23 +5613,32 @@ void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor *
 void ggml_build_backward_expand(
         struct ggml_context * ctx_static,
         struct ggml_context * ctx_compute,
-        struct ggml_cgraph  * gf,
-        struct ggml_cgraph  * gb,
+        struct ggml_cgraph  * cgraph,
         bool                  accumulate) {
-    GGML_ASSERT(gf == gb);
-    GGML_ASSERT(gb->n_nodes > 0);
-    GGML_ASSERT(gb->grads);
-    GGML_ASSERT(gb->grad_accs || !accumulate);
+    GGML_ASSERT(cgraph->n_nodes > 0);
+    GGML_ASSERT(cgraph->grads);
+    GGML_ASSERT(cgraph->grad_accs);
 
-    const int n_nodes_f = gb->n_nodes;
+    const int n_nodes_f = cgraph->n_nodes;
 
-    memset(gb->grads,     0, gb->size*sizeof(struct ggml_tensor *));
-    memset(gb->grad_accs, 0, gb->size*sizeof(struct ggml_tensor *));
+    memset(cgraph->grads,     0, cgraph->size*sizeof(struct ggml_tensor *));
+    memset(cgraph->grad_accs, 0, cgraph->size*sizeof(struct ggml_tensor *));
     bool * grads_needed = calloc(n_nodes_f, sizeof(bool));
-    bool any_grads_needed = false;
+
+    {
+        bool any_params = false;
+        bool any_loss   = false;
+        for (int i = 0; i < n_nodes_f; ++i) {
+            struct ggml_tensor * node = cgraph->nodes[i];
+            any_params = any_params || (node->flags & GGML_TENSOR_FLAG_PARAM);
+            any_loss   = any_loss   || (node->flags & GGML_TENSOR_FLAG_LOSS);
+        }
+        GGML_ASSERT(any_params && "no trainable parameters found, did you forget to call ggml_set_param?");
+        GGML_ASSERT(any_loss && "no training loss found, did you forget to call ggml_set_loss?");
+    }
 
     for (int i = 0; i < n_nodes_f; ++i) {
-        struct ggml_tensor * node = gb->nodes[i];
+        struct ggml_tensor * node = cgraph->nodes[i];
 
         if (node->type == GGML_TYPE_I32) {
             continue;
@@ -5663,7 +5672,7 @@ void ggml_build_backward_expand(
                 break;
         }
         for (int j = 0; j < GGML_MAX_SRC; ++j) {
-            if (!node->src[j] || ignore_src[j] || !grads_needed[ggml_find_node(gb, node->src[j])]) {
+            if (!node->src[j] || ignore_src[j] || !grads_needed[ggml_find_node(cgraph, node->src[j])]) {
                 continue;
             }
             GGML_ASSERT(node->src[j]->type == GGML_TYPE_F32 || node->src[j]->type == GGML_TYPE_F16);
@@ -5680,32 +5689,30 @@ void ggml_build_backward_expand(
 
         // create a new tensor with the same type and shape as the node and set it as grad
         if (accumulate && (node->flags & GGML_TENSOR_FLAG_PARAM)) {
-            gb->grads[i]     = ggml_dup_tensor(ctx_static, node);
-            gb->grad_accs[i] = gb->grads[i];
+            cgraph->grads[i]     = ggml_dup_tensor(ctx_static, node);
+            cgraph->grad_accs[i] = cgraph->grads[i];
         }
         if (node->flags & GGML_TENSOR_FLAG_LOSS) {
-            gb->grads[i] = ggml_dup_tensor(ctx_static, node);
-            gb->grad_accs[i] = gb->grads[i];
-            gb->nodes[i]->grad = gb->grads[i];
+            cgraph->grads[i] = ggml_dup_tensor(ctx_static, node);
+            cgraph->grad_accs[i] = cgraph->grads[i];
+            cgraph->nodes[i]->grad = cgraph->grads[i];
         }
         grads_needed[i] = true;
-        any_grads_needed = true;
     }
-    GGML_ASSERT(any_grads_needed && "no tensor was given gradients, did you forget to call ggml_set_param?");
 
     for (int i = n_nodes_f - 1; i >= 0; i--) {
         // inplace operations to add gradients are not created by ggml_compute_backward except for gradient accumulation
         // use allocator to automatically make inplace operations
-        ggml_compute_backward(ctx_compute, gb, i, grads_needed);
+        ggml_compute_backward(ctx_compute, cgraph, i, grads_needed);
     }
 
     for (int i = 0; i < n_nodes_f; i++) {
-        struct ggml_tensor * node = gb->nodes[i];
-        struct ggml_tensor * grad = gb->grads[i];
+        struct ggml_tensor * node = cgraph->nodes[i];
+        struct ggml_tensor * grad = cgraph->grads[i];
 
         if (grad && (node->flags & GGML_TENSOR_FLAG_PARAM)) {
             GGML_PRINT_DEBUG("%s: found root node %p\n", __func__, (void *) node);
-            ggml_build_forward_expand(gb, grad);
+            ggml_build_forward_expand(cgraph, grad);
         }
     }
 
@@ -5878,12 +5885,16 @@ void ggml_graph_reset(struct ggml_cgraph * cgraph) {
         if (grad_acc) {
             if (node->flags & GGML_TENSOR_FLAG_LOSS) {
                 GGML_ASSERT(grad_acc == node->grad);
-                GGML_ASSERT(grad_acc->buffer);
                 GGML_ASSERT(node->type == GGML_TYPE_F32);
                 GGML_ASSERT(ggml_is_scalar(node));
 
                 const float onef = 1.0f;
-                ggml_backend_tensor_set(node->grad, &onef, 0, ggml_nbytes(node->grad));
+                if (grad_acc->buffer) {
+                    ggml_backend_tensor_set(grad_acc, &onef, 0, sizeof(float));
+                } else {
+                    GGML_ASSERT(grad_acc->data);
+                    *((float *) grad_acc->data) = onef;
+                }
             } else {
                 ggml_set_zero(grad_acc);
             }

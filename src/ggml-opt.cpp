@@ -428,7 +428,7 @@ ggml_opt_context_t ggml_opt_init(struct ggml_opt_params params) {
 
     // gb_grad == graph backward gradients, forward pass, then backward pass to calculate gradients.
     result->gb_grad = ggml_graph_dup(result->ctx_compute, result->gf);
-    ggml_build_backward_expand(result->ctx_static, result->ctx_compute, result->gb_grad, result->gb_grad, params.opt_period > 1);
+    ggml_build_backward_expand(result->ctx_static, result->ctx_compute, result->gb_grad, params.opt_period > 1);
 
     // gb_opt == graph backward optimize, forward pass, then backward pass to calculate gradients, then optimizer step.
     result->gb_opt = ggml_graph_dup(result->ctx_compute, result->gb_grad);
