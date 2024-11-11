@@ -860,7 +860,12 @@ struct test_case {
             const char * bn = ggml_backend_name(backend);
             const int64_t ne = ggml_nelements(t);
 
-            std::vector<float> ga = tensor_to_float(t->grad);
+            std::vector<float> ga;
+            if (t->grad) {
+                ga = tensor_to_float(t->grad);
+            } else {
+                ga.resize(ne); // default value is 0.0f
+            }
 
             for (int64_t i = 0; i < ne; ++i) { // gradient algebraic
                 // check for nans
