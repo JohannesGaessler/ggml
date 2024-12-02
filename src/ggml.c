@@ -6342,7 +6342,7 @@ union gguf_value {
     uint64_t uint64;
     int64_t  int64;
     double   float64;
-    /* bool     bool_; // stored as int8 instead */
+    // bool     bool_; // stored as int8 instead
 
     struct gguf_str str;
 
@@ -6394,43 +6394,30 @@ static size_t gguf_type_size(enum gguf_type type) {
 }
 
 static bool gguf_tensor_info_sanitize(struct gguf_tensor_info * info) {
-    /* if (info->n_dims > GGML_MAX_DIMS) { */
-    /*     fprintf(stderr, "%s: invalid number of dimensions (%" PRIu32 ")\n", __func__, info->n_dims); */
-    /*     return false; */
-    /* } */
+    if (info->t.type < 0 || info->t.type >= GGML_TYPE_COUNT) {
+        fprintf(stderr, "%s: tensor '%s' has invalid ggml type %d (%s)\n",
+            __func__, info->t.name, info->t.type, ggml_type_name(info->t.type));
+        return false;
+    }
 
-    /* if (info->type < 0 || info->type >= GGML_TYPE_COUNT) { */
-    /*     fprintf(stderr, "%s: invalid type (%d)\n", __func__, info->type); */
-    /*     return false; */
-    /* } */
+    for (int i = 0; i < GGML_MAX_DIMS; ++i) {
+        if (info->t.ne[i] < 0) {
+            fprintf(stderr, "%s: tensor '%s' has invalid number of elements (%" PRIi64 ")\n",
+                __func__, info->t.name, info->t.ne[i]);
+            return false;
+        }
+    }
 
-    /* if (strlen(info->name.data) >= GGML_MAX_NAME) { */
-    /*     fprintf(stderr, "%s: tensor '%s' name is too long\n", __func__, info->name.data); */
-    /*     return false; */
-    /* } */
+    // prevent overflow for total number of elements
+    if ((INT64_MAX/info->t.ne[1] <= info->t.ne[0]) ||
+        (INT64_MAX/info->t.ne[2] <= info->t.ne[0]*info->t.ne[1]) ||
+        (INT64_MAX/info->t.ne[3] <= info->t.ne[0]*info->t.ne[1]*info->t.ne[2])) {
 
-    /* for (uint32_t i = 0; i < info->n_dims; ++i) { */
-    /*     if (info->ne[i] <= 0) { */
-    /*         fprintf(stderr, "%s: invalid number of elements (%" PRIu64 ")\n", __func__, info->ne[i]); */
-    /*         return false; */
-    /*     } */
-    /* } */
-
-    /* // prevent overflow for total number of elements */
-    /* if (INT64_MAX/info->ne[1] <= info->ne[0]) { */
-    /*     fprintf(stderr, "%s: invalid number of elements (%" PRIu64 ")\n", __func__, info->ne[1]); */
-    /*     return false; */
-    /* } */
-
-    /* if (INT64_MAX/info->ne[2] <= info->ne[0]*info->ne[1]) { */
-    /*     fprintf(stderr, "%s: invalid number of elements (%" PRIu64 ")\n", __func__, info->ne[2]); */
-    /*     return false; */
-    /* } */
-
-    /* if (INT64_MAX/info->ne[3] <= info->ne[0]*info->ne[1]*info->ne[2]) { */
-    /*     fprintf(stderr, "%s: invalid number of elements (%" PRIu64 ")\n", __func__, info->ne[3]); */
-    /*     return false; */
-    /* } */
+        fprintf(stderr, "%s: total number of elements in tensor '%s' with shape "
+            "(%" PRIi64 ", %" PRIi64 ", %" PRIi64 ", %" PRIi64 ") is >= %" PRIi64 "\n",
+            __func__, info->t.name, info->t.ne[0], info->t.ne[1], info->t.ne[2], info->t.ne[3], INT64_MAX);
+        return false;
+    }
 
     return true;
 }
@@ -6449,8 +6436,8 @@ static bool gguf_fread_str(FILE * file, struct gguf_str * p, size_t * offset) {
 
     ok = ok && gguf_fread_el(file, &p->n, sizeof(p->n), offset);
 
-    // early exit if string length is invalid, prevents from integer overflow
-    if (p->n == SIZE_MAX) {
+    // early exit if string length is invalid, prevents integer overflow
+    if (p->n >= SIZE_MAX) {
         fprintf(stderr, "%s: invalid string length (%" PRIu64 ")\n", __func__, p->n);
         return false;
     }
@@ -6461,7 +6448,7 @@ static bool gguf_fread_str(FILE * file, struct gguf_str * p, size_t * offset) {
         return false;
     }
 
-    ok = ok && gguf_fread_el(file,  p->data, p->n, offset);
+    ok = ok && gguf_fread_el(file, p->data, p->n, offset);
 
     return ok;
 }
@@ -6583,7 +6570,7 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
         }
     }
 
-    // read the kv pairs
+    // read the KV pairs
     {
         const uint64_t n_kv = ctx->header.n_kv;
 
@@ -6602,6 +6589,7 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
 
             ok = ok && gguf_fread_str(file, &kv->key, &offset);
             {
+                // always read enums as int32 regardless of platform
                 int32_t tmp = -1;
                 ok = ok && gguf_fread_el(file, &tmp, sizeof(tmp), &offset);
                 kv->type = tmp;
@@ -6625,6 +6613,7 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
                 case GGUF_TYPE_ARRAY:
                     {
                         {
+                            // always read enums as int32 regardless of platform
                             int32_t tmp = -1;
                             ok = ok && gguf_fread_el(file, &tmp, sizeof(tmp), &offset);
                             kv->value.arr.type = tmp;
@@ -6722,16 +6711,18 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
             return NULL;
         }
 
-        for (uint64_t i = 0; i < ctx->header.n_tensors; ++i) {
+        for (uint64_t i = 0; ok && i < ctx->header.n_tensors; ++i) {
             struct gguf_tensor_info * info = &ctx->info[i];
 
             {
                 struct gguf_str name;
-                ok = ok && gguf_fread_str(file, &name, &offset) && name.n < GGML_MAX_NAME;
-                if (!ok) {
-                    break;
+                ok = ok && gguf_fread_str(file, &name, &offset);
+                if (name.n >= GGML_MAX_NAME) {
+                    fprintf(stderr, "%s: tensor '%s' name is too long\n", __func__, name.data);
+                    ok = false;
+                    break; // abort early to prevent out-of-bounds writes
                 }
-                strcpy(info->t.name, name.data);
+                strncpy(info->t.name, name.data, name.n);
 
                 // make sure there are no duplicated tensor names
                 for (uint64_t j = 0; j < i && ok; ++j) {
@@ -6748,14 +6739,17 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
                     info->t.ne[j] = 1;
                 }
                 uint32_t n_dims;
-                ok = ok && gguf_fread_el(file, &n_dims, sizeof(n_dims), &offset) && (n_dims <= GGML_MAX_DIMS);
-                if (!ok) {
-                    break;
+                ok = ok && gguf_fread_el(file, &n_dims, sizeof(n_dims), &offset);
+                if (n_dims > GGML_MAX_DIMS) {
+                    fprintf(stderr, "%s: invalid number of dimensions (%" PRIu32 ")\n", __func__, n_dims);
+                    ok = false;
+                    break; // abort early to prevent out-of-bounds writes
                 }
                 ok = ok && gguf_fread_el(file, info->t.ne, n_dims*sizeof(info->t.ne[0]), &offset);
             }
 
             {
+                // always read enums as int32 regardless of platform
                 int32_t tmp = -1;
                 ok = ok && gguf_fread_el(file, &tmp, sizeof(tmp), &offset);
                 info->t.type = tmp;
@@ -6782,10 +6776,10 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
 
     // we require the data section to be aligned, so take into account any padding
     {
-        const size_t offset_pad = offset % ctx->alignment;
+        const size_t offset_align_overshoot = offset % ctx->alignment; // bytes beyond last aligned address
 
-        if (offset_pad != 0) {
-            offset += ctx->alignment - offset_pad;
+        if (offset_align_overshoot != 0) {
+            offset += ctx->alignment - offset_align_overshoot;
             fseek(file, offset, SEEK_SET);
         }
     }
@@ -7106,6 +7100,10 @@ const char * gguf_get_tensor_name(const struct gguf_context * ctx, int i) {
 
 enum ggml_type gguf_get_tensor_type(const struct gguf_context * ctx, int i) {
     return ctx->info[i].t.type;
+}
+
+size_t gguf_get_tensor_size(const struct gguf_context * ctx, int i) {
+    return ggml_nbytes(&ctx->info[i].t);
 }
 
 // returns the index
