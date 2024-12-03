@@ -2132,7 +2132,7 @@ extern "C" {
     GGML_API double       gguf_get_val_f64 (const struct gguf_context * ctx, int key_id);
     GGML_API bool         gguf_get_val_bool(const struct gguf_context * ctx, int key_id);
     GGML_API const char * gguf_get_val_str (const struct gguf_context * ctx, int key_id);
-    GGML_API const void * gguf_get_val_data(const struct gguf_context * ctx, int key_id);
+    GGML_API const void * gguf_get_val_data(const struct gguf_context * ctx, int key_id); // valid until next KV add/remove
     GGML_API int          gguf_get_arr_n   (const struct gguf_context * ctx, int key_id);
 
     // get raw pointer to the first element of the array with the given key_id
@@ -2166,11 +2166,14 @@ extern "C" {
     GGML_API void gguf_set_val_bool(struct gguf_context * ctx, const char * key, bool         val);
     GGML_API void gguf_set_val_str (struct gguf_context * ctx, const char * key, const char * val);
 
+    // creates a new array with n elements of the given type and copies the corresponding number of bytes from data
     GGML_API void gguf_set_arr_data(struct gguf_context * ctx, const char * key, enum gguf_type type, const void * data, int n);
+
+    // creates a new array with n strings and copies the corresponding strings from data
     GGML_API void gguf_set_arr_str (struct gguf_context * ctx, const char * key, const char ** data, int n);
 
     // set or add KV pairs from another context
-    GGML_API void gguf_set_kv(struct gguf_context * ctx, struct gguf_context * src);
+    GGML_API void gguf_set_kv(struct gguf_context * ctx, const struct gguf_context * src);
 
     // manage tensor info
     GGML_API void gguf_add_tensor(struct gguf_context * ctx, const struct ggml_tensor * tensor);
@@ -2205,6 +2208,8 @@ extern "C" {
 
     // get the size in bytes of the meta data (header, kv pairs, tensor info) including padding
     GGML_API size_t gguf_get_meta_size(const struct gguf_context * ctx);
+
+    // writes the meta data to data
     GGML_API void   gguf_get_meta_data(const struct gguf_context * ctx, void * data);
 
 #ifdef  __cplusplus
