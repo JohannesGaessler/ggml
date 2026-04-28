@@ -611,7 +611,14 @@ struct ggml_tensor * ggml_opt_inputs(ggml_opt_context_t opt_ctx) {
 }
 
 struct ggml_tensor * ggml_opt_outputs(ggml_opt_context_t opt_ctx) {
-    return opt_ctx->outputs;
+    int i = 0;
+    for (; i < opt_ctx->gf->n_nodes; i++) {
+        if (opt_ctx->gf->nodes[i] == opt_ctx->outputs) {
+            break;
+        }
+    }
+    return opt_ctx->allocated_graph_copy->nodes[i]; // FIXME
+    // return opt_ctx->outputs;
 }
 
 struct ggml_tensor * ggml_opt_labels(ggml_opt_context_t opt_ctx) {
