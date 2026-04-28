@@ -348,12 +348,12 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
         //   - gradients (1 per loss, 1 tensor per param if using gradient accumulation)
         //   - optimizer momenta (2 tensors per param)
         //   - labels (if using static graphs)
-        //   - loss (if using static graphs, up to 5 tensors)
+        //   - loss (if using static graphs, up to 11 tensors) + 1 FIXME
         //   - pred (if using static graphs)
         //   - ncorrect (if using static graphs, 2 tensors).
         constexpr size_t n_loss = 1;
         const size_t tensors_per_param = (accumulate ? 1 : 0) + (need_momenta ? 2 : 0);
-        const size_t tensors_const = opt_ctx->static_graphs ? 9 : 0;
+        const size_t tensors_const = opt_ctx->static_graphs ? 15 + 1 : 0;
         const size_t size_meta = (n_loss + tensors_per_param*n_param + tensors_const) * ggml_tensor_overhead();
         struct ggml_init_params params = {
             /*.mem_size   =*/ size_meta,
@@ -425,6 +425,46 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
             const float scale = 1.0f / (opt_ctx->opt_period * ggml_nelements(opt_ctx->outputs));
             opt_ctx->loss = ggml_scale(ctx_results, opt_ctx->loss, scale);
             ggml_set_name(opt_ctx->loss, "loss_mean_squared_error");
+            opt_ctx->loss_per_datapoint = true;
+            break;
+        }
+        case GGML_OPT_LOSS_TYPE_HETEROSCEDASTIC: {
+            GGML_ASSERT(opt_ctx->outputs->ne[2] == 2);
+            GGML_ASSERT(opt_ctx->outputs->ne[3] == 1);
+            ggml_tensor * tmp = ggml_scale(ctx_results, opt_ctx->outputs, 1.0f);
+            ggml_set_name(tmp, "tmp FIXME");
+            ggml_tensor * pred_mean = ggml_view_3d(ctx_results, tmp,
+                opt_ctx->outputs->ne[0], opt_ctx->outputs->ne[1], 1,
+                opt_ctx->outputs->nb[1], opt_ctx->outputs->nb[2], 0);
+            ggml_set_name(pred_mean, "pred_mean");
+            ggml_tensor * pred_std = ggml_view_3d(ctx_results, tmp,
+                opt_ctx->outputs->ne[0], opt_ctx->outputs->ne[1], 1,
+                opt_ctx->outputs->nb[1], opt_ctx->outputs->nb[2], opt_ctx->outputs->nb[2]);
+            ggml_set_name(pred_std, "pred_std");
+            opt_ctx->labels = ggml_dup_tensor(ctx_results, pred_mean);
+            ggml_set_input(opt_ctx->labels);
+            ggml_set_name(opt_ctx->labels, "labels");
+            opt_ctx->loss = ggml_sub(ctx_results, pred_mean, opt_ctx->labels);
+            ggml_set_name(opt_ctx->loss, "loss_error");
+            opt_ctx->loss = ggml_div(ctx_results, opt_ctx->loss, pred_std);
+            ggml_set_name(opt_ctx->loss, "loss_error_scaled");
+            opt_ctx->loss = ggml_sqr(ctx_results, opt_ctx->loss);
+            ggml_set_name(opt_ctx->loss, "loss_squared_error");
+            opt_ctx->loss = ggml_sum(ctx_results, opt_ctx->loss);
+            ggml_set_name(opt_ctx->loss, "loss_sum_squared_error");
+
+            ggml_tensor * std_penalty = ggml_sqr(ctx_results, pred_std);
+            ggml_set_name(std_penalty, "loss_var");
+            std_penalty = ggml_log(ctx_results, std_penalty);
+            ggml_set_name(std_penalty, "loss_log_var");
+            std_penalty = ggml_sum(ctx_results, std_penalty);
+            ggml_set_name(std_penalty, "loss_sum_log_var");
+            opt_ctx->loss = ggml_add(ctx_results, opt_ctx->loss, std_penalty);
+            ggml_set_name(opt_ctx->loss, "loss_sum_squared_error_log_var");
+
+            const float scale = 1.0f / (opt_ctx->opt_period * ggml_nelements(pred_mean));
+            opt_ctx->loss = ggml_scale(ctx_results, opt_ctx->loss, scale);
+            ggml_set_name(opt_ctx->loss, "loss_heteroscedastic");
             opt_ctx->loss_per_datapoint = true;
             break;
         }
