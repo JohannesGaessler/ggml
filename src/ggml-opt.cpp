@@ -949,11 +949,16 @@ void ggml_opt_epoch(
     GGML_ASSERT(idata_split % ndata_batch == 0);
     const int64_t ibatch_split = idata_split / ndata_batch;
 
+    std::vector<uint8_t> tmp_inputs(ggml_nbytes(inputs));
+    std::vector<uint8_t> tmp_labels(ggml_nbytes(labels));
+
     int64_t ibatch = 0;
     int64_t t_loop_start = ggml_time_us();
     for (; ibatch < ibatch_split; ++ibatch) {
         ggml_opt_alloc(opt_ctx, /*backward =*/ true);
-        ggml_opt_dataset_get_batch(dataset, inputs, labels, ibatch);
+        ggml_opt_dataset_get_batch_host(dataset, tmp_inputs.data(), tmp_inputs.size(), tmp_labels.data(), ibatch);
+        ggml_backend_tensor_set(inputs, tmp_inputs.data(), 0, tmp_inputs.size());
+        ggml_backend_tensor_set(labels, tmp_labels.data(), 0, tmp_labels.size());
         ggml_opt_eval(opt_ctx, result_train);
         if (callback_train) {
             callback_train(true, opt_ctx, dataset, result_train, ibatch+1, ibatch_split, t_loop_start);
@@ -962,7 +967,9 @@ void ggml_opt_epoch(
     t_loop_start = ggml_time_us();
     for (; ibatch < nbatches; ++ibatch) {
         ggml_opt_alloc(opt_ctx, /*backward =*/ false);
-        ggml_opt_dataset_get_batch(dataset, inputs, labels, ibatch);
+        ggml_opt_dataset_get_batch_host(dataset, tmp_inputs.data(), tmp_inputs.size(), tmp_labels.data(), ibatch);
+        ggml_backend_tensor_set(inputs, tmp_inputs.data(), 0, tmp_inputs.size());
+        ggml_backend_tensor_set(labels, tmp_labels.data(), 0, tmp_labels.size());
         ggml_opt_eval(opt_ctx, result_eval);
         if (callback_eval) {
             callback_eval(false, opt_ctx, dataset, result_eval, ibatch+1-ibatch_split, nbatches-ibatch_split, t_loop_start);
