@@ -322,8 +322,8 @@ static __global__ void k_repeat_back(
     const size_t s00, const size_t s01, const size_t s02, const size_t s03,
     const int64_t ne0, const int64_t ne1, const int64_t ne2, const int64_t ne3) {
 
-    const int64_t tid0  = int64_t(blockIdx.x)*blockDim.x + threadIdx.x;
-    const int64_t tid1  = int64_t(blockIdx.y)*blockDim.y + threadIdx.y;
+    const int64_t tid0  = int64_t(blockIdx.y)*blockDim.x + threadIdx.x;
+    const int64_t tid1  = int64_t(blockIdx.x)*blockDim.y + threadIdx.y;
     const int64_t tid23 = int64_t(blockIdx.z)*blockDim.z + threadIdx.z;
     const int64_t tid2  = tid23 % ne2;
     const int64_t tid3  = tid23 / ne2;
@@ -363,7 +363,7 @@ static void repeat_back_cuda(
     const int64_t ne0, const int64_t ne1, const int64_t ne2, const int64_t ne3, cudaStream_t stream) {
 
     const dim3 block_dims(WARP_SIZE, 1, 1);
-    const dim3 block_nums((ne0 + WARP_SIZE - 1) / WARP_SIZE, ne1, ne2*ne3);
+    const dim3 block_nums(ne1, (ne0 + WARP_SIZE - 1) / WARP_SIZE, ne2*ne3);
     k_repeat_back<T><<<block_nums, block_dims, 0, stream>>>
         (src, dst, ne00, ne01, ne02, ne03, s00, s01, s02, s03, ne0, ne1, ne2, ne3);
 }
