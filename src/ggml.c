@@ -6760,6 +6760,11 @@ static void ggml_compute_backward(
                 case GGML_UNARY_OP_STEP: {
                     // noop
                 } break;
+                case GGML_UNARY_OP_TANH: {
+                    if (src0_needs_grads) {
+                        ggml_add_or_set(ctx, cgraph, isrc0, ggml_sub(ctx, grad, ggml_mul(ctx, grad, ggml_sqr(ctx, tensor))));
+                    }
+                } break;
                 case GGML_UNARY_OP_RELU: {
                     if (src0_needs_grads) {
                         ggml_add_or_set(ctx, cgraph, isrc0, ggml_mul(ctx, ggml_step(ctx, src0), grad));
