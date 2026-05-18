@@ -353,7 +353,7 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
         //   - ncorrect (if using static graphs, 2 tensors).
         constexpr size_t n_loss = 1;
         const size_t tensors_per_param = (accumulate ? 1 : 0) + (need_momenta ? 2 : 0);
-        const size_t tensors_const = opt_ctx->static_graphs ? 15 + 1 : 0;
+        const size_t tensors_const = opt_ctx->static_graphs ? 100 + 1 : 0; // FIXME
         const size_t size_meta = (n_loss + tensors_per_param*n_param + tensors_const) * ggml_tensor_overhead();
         struct ggml_init_params params = {
             /*.mem_size   =*/ size_meta,
