@@ -479,29 +479,31 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
             ggml_set_input(opt_ctx->labels);
             ggml_set_name(opt_ctx->labels, "labels");
 
-            ggml_tensor * ao = ggml_abs(ctx_results, opt_ctx->outputs);
-            ggml_set_name(ao, "loss_abs_outputs");
-            ggml_tensor * lao = ggml_log(ctx_results, ao);
-            ggml_set_name(lao, "loss_log_abs_outputs");
+            ggml_tensor * so  = ggml_sgn(ctx_results, opt_ctx->outputs);
+            ggml_tensor * sl  = ggml_sgn(ctx_results, opt_ctx->labels);
+            ggml_tensor * ss  = ggml_mul(ctx_results, so, sl);
+            ggml_tensor * ds  = ggml_neg(ctx_results, ss);
+            ggml_tensor * sss = ggml_step(ctx_results, ss);
+            ggml_tensor * sds = ggml_step(ctx_results, ds);
 
             ggml_tensor * al = ggml_abs(ctx_results, opt_ctx->labels);
             ggml_set_name(al, "loss_abs_labels");
             ggml_tensor * lal = ggml_log(ctx_results, al);
             ggml_set_name(lal, "loss_log_abs_labels");
 
-            ggml_tensor * so = ggml_sgn(ctx_results, opt_ctx->outputs);
-            ggml_tensor * sl = ggml_sgn(ctx_results, opt_ctx->labels);
-            ggml_tensor * ss = ggml_mul(ctx_results, so, sl);
-            ggml_tensor * ds = ggml_neg(ctx_results, ss);
+            ggml_tensor * ao = ggml_abs(ctx_results, opt_ctx->outputs);
+            ggml_set_name(ao, "loss_abs_outputs");
+            ggml_tensor * lao = ggml_log(ctx_results, ggml_add(ctx_results, ao, ggml_scale(ctx_results, al, 1e-6f)));
+            ggml_set_name(lao, "loss_log_abs_outputs");
 
             opt_ctx->loss = ggml_sub(ctx_results, lao, lal);
             ggml_set_name(opt_ctx->loss, "loss_log_error");
-            opt_ctx->loss = ggml_mul(ctx_results, opt_ctx->loss, ggml_step(ctx_results, ss));
+            opt_ctx->loss = ggml_mul(ctx_results, sss, opt_ctx->loss);
             ggml_set_name(opt_ctx->loss, "loss_log_error_filtered");
             opt_ctx->loss = ggml_sqr(ctx_results, opt_ctx->loss);
             ggml_set_name(opt_ctx->loss, "loss_squared_log_error");
             opt_ctx->loss = ggml_add(ctx_results, opt_ctx->loss,
-                ggml_mul(ctx_results, ggml_step(ctx_results, ds), ao));
+                ggml_mul(ctx_results, sds, ao));
             ggml_set_name(opt_ctx->loss, "loss_squared_log_error_plus_abs_out");
             opt_ctx->loss = ggml_sum(ctx_results, opt_ctx->loss);
             ggml_set_name(opt_ctx->loss, "loss_sum_squared_error");
