@@ -474,6 +474,43 @@ static void ggml_opt_build(ggml_opt_context_t opt_ctx) {
             opt_ctx->loss_per_datapoint = true;
             break;
         }
+        case GGML_OPT_LOSS_TYPE_MEAN_SQUARED_LOGARITHMIC_ERROR: {
+            opt_ctx->labels = ggml_dup_tensor(ctx_results, opt_ctx->outputs);
+            ggml_set_input(opt_ctx->labels);
+            ggml_set_name(opt_ctx->labels, "labels");
+
+            ggml_tensor * ao = ggml_abs(ctx_results, opt_ctx->outputs);
+            ggml_set_name(ao, "loss_abs_outputs");
+            ggml_tensor * lao = ggml_log(ctx_results, ao);
+            ggml_set_name(lao, "loss_log_abs_outputs");
+
+            ggml_tensor * al = ggml_abs(ctx_results, opt_ctx->labels);
+            ggml_set_name(al, "loss_abs_labels");
+            ggml_tensor * lal = ggml_log(ctx_results, al);
+            ggml_set_name(lal, "loss_log_abs_labels");
+
+            ggml_tensor * so = ggml_sgn(ctx_results, opt_ctx->outputs);
+            ggml_tensor * sl = ggml_sgn(ctx_results, opt_ctx->labels);
+            ggml_tensor * ss = ggml_mul(ctx_results, so, sl);
+            ggml_tensor * ds = ggml_neg(ctx_results, ss);
+
+            opt_ctx->loss = ggml_sub(ctx_results, lao, lal);
+            ggml_set_name(opt_ctx->loss, "loss_log_error");
+            opt_ctx->loss = ggml_mul(ctx_results, opt_ctx->loss, ggml_step(ctx_results, ss));
+            ggml_set_name(opt_ctx->loss, "loss_log_error_filtered");
+            opt_ctx->loss = ggml_sqr(ctx_results, opt_ctx->loss);
+            ggml_set_name(opt_ctx->loss, "loss_squared_log_error");
+            opt_ctx->loss = ggml_add(ctx_results, opt_ctx->loss,
+                ggml_mul(ctx_results, ggml_step(ctx_results, ds), ao));
+            ggml_set_name(opt_ctx->loss, "loss_squared_log_error_plus_abs_out");
+            opt_ctx->loss = ggml_sum(ctx_results, opt_ctx->loss);
+            ggml_set_name(opt_ctx->loss, "loss_sum_squared_error");
+            const float scale = 1.0f / (opt_ctx->opt_period * ggml_nelements(opt_ctx->outputs));
+            opt_ctx->loss = ggml_scale(ctx_results, opt_ctx->loss, scale);
+            ggml_set_name(opt_ctx->loss, "loss_mean_squared_error");
+            opt_ctx->loss_per_datapoint = true;
+            break;
+        }
         case GGML_OPT_LOSS_TYPE_MEAN_SQUARED_ASYMMETRY: {
             opt_ctx->labels = ggml_dup_tensor(ctx_results, opt_ctx->outputs);
             ggml_set_input(opt_ctx->labels);
