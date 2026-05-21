@@ -983,9 +983,8 @@ void ggml_opt_eval(ggml_opt_context_t opt_ctx, ggml_opt_result_t result) {
         opt_ctx->gb_opt               = nullptr;
         opt_ctx->allocated_graph      = nullptr;
         opt_ctx->allocated_graph_copy = nullptr;
+        opt_ctx->eval_ready = false;
     }
-
-    opt_ctx->eval_ready = false;
 
     if (!result) {
         return;
